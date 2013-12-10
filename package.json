@@ -1,0 +1,31 @@
+{
+  "name": "dbeasy",
+  "version": "0.0.1",
+  "description": "Promise-based wrapper for postgresql driver that makes easy what should be easy while protecting your foot.",
+  "main": "index.js",
+  "scripts": {
+    "test": "runtests.sh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/nomic/dbeasy"
+  },
+  "keywords": [
+    "postgres",
+    "postgresql",
+    "db",
+    "database",
+    "promises"
+  ],
+  "author": "Aaron Boyd",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/nomic/dbeasy/issues"
+  },
+  "homepage": "https://github.com/nomic/dbeasy",
+  "dependencies": {
+    "pg": "2.3.1",
+    "when": "2.3.0",
+    "underscore": "1.5.1"
+   }
+}

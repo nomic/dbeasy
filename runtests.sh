@@ -1,0 +1,1 @@
+foreman run mocha --ui tdd --reporter spec ./test.js

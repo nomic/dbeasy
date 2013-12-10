@@ -1,0 +1,143 @@
+0 info it worked if it ends with ok
+1 verbose cli [ '/opt/nvm/v0.10.22/bin/node',
+1 verbose cli   '/opt/nvm/v0.10.22/bin/npm',
+1 verbose cli   'publish' ]
+2 info using npm@1.3.14
+3 info using node@v0.10.22
+4 verbose publish [ '.' ]
+5 verbose cache add [ '.', null ]
+6 verbose cache add name=undefined spec="." args=[".",null]
+7 verbose parsed url { protocol: null,
+7 verbose parsed url   slashes: null,
+7 verbose parsed url   auth: null,
+7 verbose parsed url   host: null,
+7 verbose parsed url   port: null,
+7 verbose parsed url   hostname: null,
+7 verbose parsed url   hash: null,
+7 verbose parsed url   search: null,
+7 verbose parsed url   query: null,
+7 verbose parsed url   pathname: '.',
+7 verbose parsed url   path: '.',
+7 verbose parsed url   href: '.' }
+8 silly lockFile 3a52ce78- .
+9 verbose lock . /home/aaron/.npm/3a52ce78-.lock
+10 verbose tar pack [ '/home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/tmp.tgz',
+10 verbose tar pack   '.' ]
+11 verbose tarball /home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/tmp.tgz
+12 verbose folder .
+13 info prepublish dbeasy@0.0.0
+14 silly lockFile 1f1177db-tar tar://.
+15 verbose lock tar://. /home/aaron/.npm/1f1177db-tar.lock
+16 silly lockFile 52b4b56d-33218-0-1192371470388025-tmp-tgz tar:///home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/tmp.tgz
+17 verbose lock tar:///home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/tmp.tgz /home/aaron/.npm/52b4b56d-33218-0-1192371470388025-tmp-tgz.lock
+18 silly lockFile 1f1177db-tar tar://.
+19 silly lockFile 1f1177db-tar tar://.
+20 silly lockFile 52b4b56d-33218-0-1192371470388025-tmp-tgz tar:///home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/tmp.tgz
+21 silly lockFile 52b4b56d-33218-0-1192371470388025-tmp-tgz tar:///home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/tmp.tgz
+22 verbose tar unpack /home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/tmp.tgz
+23 silly lockFile be0a57b3-33218-0-1192371470388025-package tar:///home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/package
+24 verbose lock tar:///home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/package /home/aaron/.npm/be0a57b3-33218-0-1192371470388025-package.lock
+25 silly lockFile 52b4b56d-33218-0-1192371470388025-tmp-tgz tar:///home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/tmp.tgz
+26 verbose lock tar:///home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/tmp.tgz /home/aaron/.npm/52b4b56d-33218-0-1192371470388025-tmp-tgz.lock
+27 silly gunzTarPerm modes [ '755', '644' ]
+28 silly gunzTarPerm extractEntry package.json
+29 silly gunzTarPerm extractEntry README.md
+30 silly gunzTarPerm extractEntry index.js
+31 silly gunzTarPerm extractEntry test.js
+32 silly gunzTarPerm extractEntry index.js~
+33 silly gunzTarPerm extractEntry package.json~
+34 silly gunzTarPerm extractEntry runtests.sh
+35 silly lockFile be0a57b3-33218-0-1192371470388025-package tar:///home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/package
+36 silly lockFile be0a57b3-33218-0-1192371470388025-package tar:///home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/package
+37 silly lockFile 52b4b56d-33218-0-1192371470388025-tmp-tgz tar:///home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/tmp.tgz
+38 silly lockFile 52b4b56d-33218-0-1192371470388025-tmp-tgz tar:///home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/tmp.tgz
+39 verbose tar pack [ '/home/aaron/.npm/dbeasy/0.0.0/package.tgz',
+39 verbose tar pack   '/home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/package' ]
+40 verbose tarball /home/aaron/.npm/dbeasy/0.0.0/package.tgz
+41 verbose folder /home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/package
+42 silly lockFile be0a57b3-33218-0-1192371470388025-package tar:///home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/package
+43 verbose lock tar:///home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/package /home/aaron/.npm/be0a57b3-33218-0-1192371470388025-package.lock
+44 silly lockFile 77e342be-ron-npm-dbeasy-0-0-0-package-tgz tar:///home/aaron/.npm/dbeasy/0.0.0/package.tgz
+45 verbose lock tar:///home/aaron/.npm/dbeasy/0.0.0/package.tgz /home/aaron/.npm/77e342be-ron-npm-dbeasy-0-0-0-package-tgz.lock
+46 silly lockFile be0a57b3-33218-0-1192371470388025-package tar:///home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/package
+47 silly lockFile be0a57b3-33218-0-1192371470388025-package tar:///home/aaron/tmp/npm-11692-auA4qvJl/1386653533218-0.1192371470388025/package
+48 silly lockFile 77e342be-ron-npm-dbeasy-0-0-0-package-tgz tar:///home/aaron/.npm/dbeasy/0.0.0/package.tgz
+49 silly lockFile 77e342be-ron-npm-dbeasy-0-0-0-package-tgz tar:///home/aaron/.npm/dbeasy/0.0.0/package.tgz
+50 silly lockFile a3a4fe76-e-aaron-npm-dbeasy-0-0-0-package /home/aaron/.npm/dbeasy/0.0.0/package
+51 verbose lock /home/aaron/.npm/dbeasy/0.0.0/package /home/aaron/.npm/a3a4fe76-e-aaron-npm-dbeasy-0-0-0-package.lock
+52 silly lockFile a3a4fe76-e-aaron-npm-dbeasy-0-0-0-package /home/aaron/.npm/dbeasy/0.0.0/package
+53 silly lockFile a3a4fe76-e-aaron-npm-dbeasy-0-0-0-package /home/aaron/.npm/dbeasy/0.0.0/package
+54 verbose tar unpack /home/aaron/.npm/dbeasy/0.0.0/package.tgz
+55 silly lockFile ee9a1009-e-aaron-npm-dbeasy-0-0-0-package tar:///home/aaron/.npm/dbeasy/0.0.0/package
+56 verbose lock tar:///home/aaron/.npm/dbeasy/0.0.0/package /home/aaron/.npm/ee9a1009-e-aaron-npm-dbeasy-0-0-0-package.lock
+57 silly lockFile 77e342be-ron-npm-dbeasy-0-0-0-package-tgz tar:///home/aaron/.npm/dbeasy/0.0.0/package.tgz
+58 verbose lock tar:///home/aaron/.npm/dbeasy/0.0.0/package.tgz /home/aaron/.npm/77e342be-ron-npm-dbeasy-0-0-0-package-tgz.lock
+59 silly gunzTarPerm modes [ '755', '644' ]
+60 silly gunzTarPerm extractEntry package.json
+61 silly gunzTarPerm extractEntry README.md
+62 silly gunzTarPerm extractEntry index.js
+63 silly gunzTarPerm extractEntry test.js
+64 silly gunzTarPerm extractEntry index.js~
+65 silly gunzTarPerm extractEntry package.json~
+66 silly gunzTarPerm extractEntry runtests.sh
+67 silly lockFile ee9a1009-e-aaron-npm-dbeasy-0-0-0-package tar:///home/aaron/.npm/dbeasy/0.0.0/package
+68 silly lockFile ee9a1009-e-aaron-npm-dbeasy-0-0-0-package tar:///home/aaron/.npm/dbeasy/0.0.0/package
+69 silly lockFile 77e342be-ron-npm-dbeasy-0-0-0-package-tgz tar:///home/aaron/.npm/dbeasy/0.0.0/package.tgz
+70 silly lockFile 77e342be-ron-npm-dbeasy-0-0-0-package-tgz tar:///home/aaron/.npm/dbeasy/0.0.0/package.tgz
+71 verbose chmod /home/aaron/.npm/dbeasy/0.0.0/package.tgz 644
+72 verbose chown /home/aaron/.npm/dbeasy/0.0.0/package.tgz [ 1001, 2000 ]
+73 silly lockFile 3a52ce78- .
+74 silly lockFile 3a52ce78- .
+75 silly publish { name: 'dbeasy',
+75 silly publish   version: '0.0.0',
+75 silly publish   description: 'Promise-based wrapper for postgresql driver that makes easy what should be easy while protecting your foot.',
+75 silly publish   main: 'index.js',
+75 silly publish   scripts: { test: 'runtests.sh' },
+75 silly publish   repository: { type: 'git', url: 'git://github.com/nomic/dbeasy' },
+75 silly publish   keywords: [ 'postgres', 'postgresql', 'db', 'database', 'promises' ],
+75 silly publish   author: { name: 'Aaron Boyd' },
+75 silly publish   license: 'MIT',
+75 silly publish   bugs: { url: 'https://github.com/nomic/dbeasy/issues' },
+75 silly publish   homepage: 'https://github.com/nomic/dbeasy',
+75 silly publish   dependencies: { pg: '2.3.1', when: '2.3.0', underscore: '1.5.1' },
+75 silly publish   readme: 'dbeasy\n=======\n\nPromise-based wrapper for nodejs postgresql driver that makes easy what should be easy.\n\n',
+75 silly publish   readmeFilename: 'README.md',
+75 silly publish   _id: 'dbeasy@0.0.0',
+75 silly publish   dist: { shasum: 'a2cbbd4ea7c170e5740d9c3788b216a8974de2c3' },
+75 silly publish   _from: '.' }
+76 verbose url raw dbeasy
+77 verbose url resolving [ 'https://registry.npmjs.org/', './dbeasy' ]
+78 verbose url resolved https://registry.npmjs.org/dbeasy
+79 info trying registry request attempt 1 at 21:32:14
+80 http PUT https://registry.npmjs.org/dbeasy
+81 http 201 https://registry.npmjs.org/dbeasy
+82 verbose url raw dbeasy
+83 verbose url resolving [ 'https://registry.npmjs.org/', './dbeasy' ]
+84 verbose url resolved https://registry.npmjs.org/dbeasy
+85 info trying registry request attempt 1 at 21:32:24
+86 http GET https://registry.npmjs.org/dbeasy
+87 http 200 https://registry.npmjs.org/dbeasy
+88 verbose uploading [ 'dbeasy/-/dbeasy-0.0.0.tgz/-rev/1-702e965b6eada6cad124437d3f5fc5bc',
+88 verbose uploading   '/home/aaron/.npm/dbeasy/0.0.0/package.tgz' ]
+89 verbose url raw dbeasy/-/dbeasy-0.0.0.tgz/-rev/1-702e965b6eada6cad124437d3f5fc5bc
+90 verbose url resolving [ 'https://registry.npmjs.org/',
+90 verbose url resolving   './dbeasy/-/dbeasy-0.0.0.tgz/-rev/1-702e965b6eada6cad124437d3f5fc5bc' ]
+91 verbose url resolved https://registry.npmjs.org/dbeasy/-/dbeasy-0.0.0.tgz/-rev/1-702e965b6eada6cad124437d3f5fc5bc
+92 info trying registry request attempt 1 at 21:32:26
+93 http PUT https://registry.npmjs.org/dbeasy/-/dbeasy-0.0.0.tgz/-rev/1-702e965b6eada6cad124437d3f5fc5bc
+94 http 409 https://registry.npmjs.org/dbeasy/-/dbeasy-0.0.0.tgz/-rev/1-702e965b6eada6cad124437d3f5fc5bc
+95 error publish fail Cannot publish over existing version.
+95 error publish fail Update the 'version' field in package.json and try again.
+95 error publish fail
+95 error publish fail If the previous version was published in error, see:
+95 error publish fail     npm help unpublish
+95 error publish fail
+95 error publish fail To automatically increment version numbers, see:
+95 error publish fail     npm help version
+96 error System Linux 3.2.0-29-virtual
+97 error command "/opt/nvm/v0.10.22/bin/node" "/opt/nvm/v0.10.22/bin/npm" "publish"
+98 error cwd /mnt/nomic-dev/dbeasy
+99 error node -v v0.10.22
+100 error npm -v 1.3.14
+101 error code EPUBLISHCONFLICT
+102 verbose exit [ 1, true ]
