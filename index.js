@@ -4,7 +4,6 @@ var pg = require('pg')
 , assert = require('assert')
 , nodefn = require('when/node/function')
 , _ = require('underscore')
-, error = require ('nomic/error')
 , fs = require('fs')
 , when = require('when')
 , whenfn = require('when/function');
