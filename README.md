@@ -1,4 +1,4 @@
-db-easy
+dbeasy
 =======
 
-Wrapper for postgresql driver that makes easy what should be easy.
+Wrapper for nodejs postgresql driver that makes easy what should be easy.
