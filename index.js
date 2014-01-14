@@ -26,9 +26,27 @@ function error(msg, detail, cause) {
     err.detail = detail || {};
     if (cause) err.cause = cause;
     return err;
+}
+
+exports.envToConfig = function(prefix) {
+    var pgconf = {};
+    _.each(['host', 'user', 'port', 'password', 'database'], function(key) {
+        var envKey = prefix + key.toUpperCase();
+        if (!process.env[envKey]) throw new Error('missing configuration: '+envKey);
+        pgconf[key] = process.env[envKey];
+    });
+    return pgconf;
+};
+
+exports.encodeArray = function(arr, conformer) {
+    return '{' + _.map(arr, conformer).join(',') + '}';
 };
 
 exports.create = function(options) {
+    var logger = options.logger || {
+        info: function(){},
+        error: function(){},
+    };
     options = options || {};
     var db = {};
     db.__prepared = {};
@@ -209,6 +227,22 @@ exports.create = function(options) {
             throw error("Failed to prepare", {key: key}, err);
         });
         return reading;
+    };
+
+    db.prepareAll = function(/* statements */) {
+        return when.join(
+            _.map(arguments, function(arg) {
+                if (_.isString(arg)) {
+                    return db.prepare(arg);
+                }
+                return db.prepare.apply(null, arg);
+            })
+        ).then( function(results) {
+            _.each(results, function(r) {
+                logger.info("prepared statement loaded:", r);
+            });
+            return results;
+        });
     };
 
     db.status = function() {
