@@ -11,13 +11,13 @@ var pg = require('pg')
 
 function conString(pgconf) {
     return "postgres://"+pgconf.user+":"+pgconf.password+"@"+pgconf.host+":"+pgconf.port+"/"+pgconf.database+"?ssl=on";
-};
+}
 
 function loadQuery(loadpath, fileName) {
     return nodefn.call(fs.readFile, loadpath+"/"+fileName+".sql").then(function(data) {
         return data.toString();
     });
-};
+}
 
 function error(msg, detail, cause) {
     var err = new Error(msg);
