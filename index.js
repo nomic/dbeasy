@@ -53,6 +53,12 @@ exports.create = function(options) {
     db.__loadpath = options.loadpath || "";
     var requestedPoolSize = options.poolSize || pg.defaults.poolSize;
     pg.defaults.poolSize = requestedPoolSize;
+    var egress = options.egress
+        ? function(rows) {
+            return _.map(rows, options.egress);
+        }
+        : function(rows) { return rows; }
+
     // connect to the postgres db defined in conf
     var onConnection = function(fn) {
         return nodefn.call(_.bind(pg.connect, pg, conString(options)))
@@ -72,7 +78,7 @@ exports.create = function(options) {
                     if (vals !== undefined) { vals = _.rest(arguments); }
                     return nodefn.call(_.bind(conn.query, conn), text, vals)
                         .then(function(result) {
-                            return result.rows ? result.rows : null;
+                            return result.rows ? egress(result.rows) : null;
                         })
                         .otherwise(function(err) {
                             throw error('query failed', {text: text, vals: vals}, err);
@@ -98,7 +104,7 @@ exports.create = function(options) {
                         types: prepared.types
                     };
                     return nodefn.call(_.bind(conn.query, conn), opts).then(function(result) {
-                        return result.rows ? result.rows : null;
+                        return result.rows ? egress(result.rows) : null;
                     })
                     .otherwise(function(err) {
                         if (err && err.code) {
