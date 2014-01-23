@@ -56,7 +56,7 @@ suite("db easy", function() {
 
     });
 
-    test("deadlock on nested connection requests", function(done) {
+    test("deadlock on nested connection requests", null, function(done) {
         db = createDb({poolSize: 1});
         var gotFirstConnection = false;
         var gotSecondConnection = false;
@@ -84,7 +84,7 @@ suite("db easy", function() {
 
     });
 
-    test("don't deadlock on parallel connection requests", function(done) {
+    test("don't deadlock on parallel connection requests", null, function(done) {
         db = createDb({poolSize: 1});
         var gotConnection = _.map(_.range(10), function() { return false; });
 
