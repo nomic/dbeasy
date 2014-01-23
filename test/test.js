@@ -195,4 +195,24 @@ suite("db easy", function() {
         }).otherwise(done);
     });
 
+    test("prepare a statement from a template", function(done) {
+        db = createDb({loadpath: __dirname, poolSize:10});
+
+        var preparing = db.prepareTemplate('descending', 'test_query.template', {direction: 'DESC'});
+
+        var inserting = preparing.then(function() {
+            return db.query('INSERT INTO foo VALUES (1), (2), (3), (4);');
+        });
+
+        var querying = inserting.then(function() {
+            return db.exec('descending', 2);
+        });
+
+        querying.then(function(result) {
+            assert.equal(result.length, 2);
+            assert.equal(result[0].bar, 4);
+            assert.equal(result[1].bar, 3);
+            done();
+        }).otherwise(done);
+    });
 });
