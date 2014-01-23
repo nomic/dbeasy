@@ -4,7 +4,7 @@
   "description": "Promise-based wrapper for postgresql driver that makes easy what should be easy while protecting your foot.",
   "main": "index.js",
   "scripts": {
-    "test": "runtests.sh"
+    "test": "./runtests.sh"
   },
   "repository": {
     "type": "git",
