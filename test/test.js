@@ -3,7 +3,7 @@
 var when = require("when")
 , delay = require("when/delay")
 , _ = require("underscore")
-, dbeasy = require("./index.js")
+, dbeasy = require("../index.js")
 , assert = require("assert");
 
 var pgconf = {};
