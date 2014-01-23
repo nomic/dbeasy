@@ -176,4 +176,23 @@ suite("db easy", function() {
         }).otherwise(done);
     });
 
+    test("prepare a statement", function(done) {
+        db = createDb({loadpath: __dirname, poolSize:10});
+
+        var preparing = db.prepare('test_query');
+
+        var inserting = preparing.then(function() {
+            return db.query('INSERT INTO foo VALUES (1), (2), (3), (4);');
+        });
+
+        var querying = inserting.then(function() {
+            return db.exec('test_query', 2);
+        });
+
+        querying.then(function(result) {
+            assert.equal(result.length, 2);
+            done();
+        }).otherwise(done);
+    });
+
 });
