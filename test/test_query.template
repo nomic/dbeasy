@@ -1,0 +1,4 @@
+SELECT *
+  FROM foo
+ WHERE bar > $1
+ ORDER BY bar {{direction}}

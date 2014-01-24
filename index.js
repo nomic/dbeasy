@@ -6,15 +6,16 @@ var pg = require('pg')
 , _ = require('underscore')
 , fs = require('fs')
 , when = require('when')
-, whenfn = require('when/function');
+, whenfn = require('when/function')
+, handlebars = require('handlebars');
 
 
 function conString(pgconf) {
     return "postgres://"+pgconf.user+":"+pgconf.password+"@"+pgconf.host+":"+pgconf.port+"/"+pgconf.database+"?ssl=on";
 }
 
-function loadQuery(loadpath, fileName) {
-    return nodefn.call(fs.readFile, loadpath+"/"+fileName+".sql").then(function(data) {
+function loadQuery(loadpath, fileName, extension) {
+    return nodefn.call(fs.readFile, loadpath+"/"+fileName).then(function(data) {
         return data.toString();
     });
 }
@@ -205,6 +206,29 @@ exports.create = function(options) {
         });
     };
 
+    db.prepareTemplate = function(key, templateFile, context, types) {
+        var reading = loadQuery(db.__loadpath, templateFile);
+
+        var templating = reading.then(function(templateBody) {
+            var template = handlebars.compile(templateBody);
+            var text = template(context);
+
+            return text;
+        });
+
+        var stashing = templating.then(function(text) {
+            db.__prepared[key] = {
+                name: key,
+                text: text,
+                types: types
+            };
+
+            return key;
+        });
+
+        return stashing;
+    };
+
     db.prepare = function() {
         var key, text, types;
         assert(arguments.length <= 3);
@@ -226,7 +250,7 @@ exports.create = function(options) {
             stash(text);
             return when(key);
         }
-        var reading = loadQuery(db.__loadpath, key).then(stash)
+        var reading = loadQuery(db.__loadpath, key+'.sql').then(stash)
         .then(function() {
             return key;
         }, function(err) {

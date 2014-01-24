@@ -1,10 +1,10 @@
 {
   "name": "dbeasy",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Promise-based wrapper for postgresql driver that makes easy what should be easy while protecting your foot.",
   "main": "index.js",
   "scripts": {
-    "test": "runtests.sh"
+    "test": "test/runtests.sh"
   },
   "repository": {
     "type": "git",
@@ -26,6 +26,7 @@
   "dependencies": {
     "pg": "2.3.1",
     "when": "2.3.0",
-    "underscore": "1.5.1"
+    "underscore": "1.5.1",
+    "handlebars": "1.3.0"
    }
 }
