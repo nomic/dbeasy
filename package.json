@@ -1,6 +1,6 @@
 {
   "name": "dbeasy",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Promise-based wrapper for postgresql driver that makes easy what should be easy while protecting your foot.",
   "main": "index.js",
   "scripts": {
