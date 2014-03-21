@@ -4,6 +4,7 @@ var pg = require('pg')
 , assert = require('assert')
 , nodefn = require('when/node/function')
 , _ = require('underscore')
+, _str = require('underscore.string')
 , fs = require('fs')
 , when = require('when')
 , whenfn = require('when/function')
@@ -14,7 +15,7 @@ function conString(pgconf) {
     return "postgres://"+pgconf.user+":"+pgconf.password+"@"+pgconf.host+":"+pgconf.port+"/"+pgconf.database+"?ssl=on";
 }
 
-function loadQuery(loadpath, fileName, extension) {
+function loadQuery(loadpath, fileName) {
     return nodefn.call(fs.readFile, loadpath+"/"+fileName).then(function(data) {
         return data.toString();
     });
@@ -41,6 +42,18 @@ exports.envToConfig = function(prefix) {
 
 exports.encodeArray = function(arr, conformer) {
     return '{' + _.map(arr, conformer).join(',') + '}';
+};
+
+exports.camelizeColumnNames = function(row) {
+    var r = {};
+    _.each(row, function(v, k) {
+        var end = k.slice(-3);
+        if (end === "_id")
+            r[_str.camelize(k.slice(0,-3))] = {id: v};
+        else
+            r[_str.camelize(k)] = v;
+    });
+    return r;
 };
 
 exports.create = function(options) {
