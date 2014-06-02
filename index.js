@@ -66,6 +66,7 @@ exports.camelizeColumnNames = function(row) {
 
 exports.create = function(options) {
     var logger = options.logger || {
+        debug: function(){},
         info: function(){},
         error: function(){},
     };
@@ -290,7 +291,7 @@ exports.create = function(options) {
             })
         ).then( function(results) {
             _.each(results, function(r) {
-                logger.info("prepared statement loaded:", r);
+                logger.debug("prepared statement loaded:", r);
             });
             return results;
         });
@@ -316,6 +317,10 @@ exports.create = function(options) {
             });
             delete pg.pools.all[key];
         });
+    };
+
+    db.cleansedConfig = function() {
+        return _.omit(options, "password", "logger", "egress");
     };
 
     return db;
