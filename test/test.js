@@ -9,7 +9,7 @@ var when = require("when")
 var pgconf = {};
 _.each(['host', 'database', 'user', 'port', 'password'], function(key) {
     var envKey = 'POSTGRES_'+key.toUpperCase();
-    if (!process.env[envKey]) throw new Error('missing environment variable: '+envKey);
+    if (!process.env[envKey]) return;
     pgconf[key] = process.env[envKey];
 });
 
