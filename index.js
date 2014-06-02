@@ -12,7 +12,15 @@ var pg = require('pg')
 
 
 function conString(pgconf) {
-    return "postgres://"+pgconf.user+":"+pgconf.password+"@"+pgconf.host+":"+pgconf.port+"/"+pgconf.database+"?ssl=on";
+    var host = pgconf.host || "localhost";
+    var port = pgconf.port || 5432;
+    var database = pgconf.database || "postgres";
+    var userString = pgconf.user
+        ? pgconf.user + (
+            pgconf.password ? ":" + pgconf.password : ""
+        ) + "@"
+        : "";
+    return "postgres://"+userString+host+":"+port+"/"+database+"?ssl=on";
 }
 
 function loadQuery(loadpath, fileName) {
@@ -34,7 +42,7 @@ exports.envToConfig = function(prefix) {
     var pgconf = {};
     _.each(['host', 'user', 'port', 'password', 'database'], function(key) {
         var envKey = prefix + key.toUpperCase();
-        if (!process.env[envKey]) throw new Error('missing configuration: '+envKey);
+        if (!process.env[envKey]) return;
         pgconf[key] = process.env[envKey];
     });
     return pgconf;
