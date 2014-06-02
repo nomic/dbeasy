@@ -19,13 +19,19 @@ suite("db easy", function() {
 
     var createTestTable = function(db) {
         return db.onConnection( function(conn) {
-            conn.query("CREATE TABLE foo (bar int);");
+            return when.join(
+                conn.query("CREATE TABLE foo (bar int);"),
+                conn.query("CREATE TABLE fooid (id int, bar int);")
+            );
         }).yield();
     };
 
     var dropTestTable = function(db) {
         return db.onConnection( function(conn) {
-            return conn.query("DROP TABLE IF EXISTS foo;");
+            return when.join(
+                conn.query("DROP TABLE IF EXISTS foo;"),
+                conn.query("DROP TABLE IF EXISTS fooid;")
+            );
         }).yield();
     };
 
@@ -56,7 +62,7 @@ suite("db easy", function() {
 
     });
 
-    test("deadlock on nested connection requests", null, function(done) {
+    test("deadlock on nested connection requests", function(done) {
         db = createDb({poolSize: 1});
         var gotFirstConnection = false;
         var gotSecondConnection = false;
@@ -84,7 +90,7 @@ suite("db easy", function() {
 
     });
 
-    test("don't deadlock on parallel connection requests", null, function(done) {
+    test("don't deadlock on parallel connection requests", function(done) {
         db = createDb({poolSize: 1});
         var gotConnection = _.map(_.range(10), function() { return false; });
 
@@ -215,4 +221,37 @@ suite("db easy", function() {
             done();
         }).otherwise(done);
     });
+
+
+    test("db.exec: write then read consistency", function(done) {
+
+        db = createDb({loadpath: __dirname, poolSize:10});
+        var counter = 0;
+
+        db.prepare('update_stmt', 'UPDATE fooid SET bar = bar+1 WHERE id = 0;');
+        db.prepare('select_stmt', 'SELECT * from fooid;');
+        return db.query('INSERT INTO fooid VALUES (0, 0);')
+        .then(function() {
+            function again(db) {
+                if (counter === 200) return;
+
+                return when.all([
+                    db.exec('update_stmt'),
+                    db.exec('update_stmt'),
+                    db.exec('update_stmt'),
+                    db.exec('update_stmt'),
+                ])
+                .then(function(){
+                    return db.exec('select_stmt').then( function(result) {
+                        assert.equal(result[0].bar, (counter+1)*4);
+                        counter += 1;
+                        return again(db);
+                    });
+                });
+            }
+            return again(db);
+        }).otherwise(function(err) {console.log(err.cause); throw err;}).then(function() {done();}, done);
+
+    });
+
 });
