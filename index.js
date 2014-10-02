@@ -3,7 +3,7 @@
 var pg = require('pg')
 , assert = require('assert')
 , nodefn = require('when/node/function')
-, _ = require('underscore')
+, _ = require('lodash')
 , _str = require('underscore.string')
 , fs = require('fs')
 , when = require('when')
@@ -12,6 +12,8 @@ var pg = require('pg')
 
 
 function conString(pgconf) {
+    if (pgconf.url) return pgconf.url;
+
     var host = pgconf.host || "localhost";
     var port = pgconf.port || 5432;
     var database = pgconf.database || "postgres";
@@ -37,6 +39,17 @@ function error(msg, detail, cause) {
     if (cause) err.cause = cause;
     return err;
 }
+
+function parseNamedParams(text) {
+    var paramsRegex = /\$([0-9]+):\ *([a-zA-Z_\$]+)/mg,
+        matches,
+        params = [];
+    while (matches = paramsRegex.exec(text)) {
+        params[parseInt(matches[1], 10) - 1] = matches[2];
+    }
+    return params;
+}
+exports.parseNamedParams = parseNamedParams;
 
 exports.envToConfig = function(prefix) {
     var pgconf = {};
@@ -64,7 +77,7 @@ exports.camelizeColumnNames = function(row) {
     return r;
 };
 
-exports.create = function(options) {
+exports.connect = function(options) {
     var logger = options.logger || {
         debug: function(){},
         info: function(){},
@@ -80,7 +93,7 @@ exports.create = function(options) {
         ? function(rows) {
             return _.map(rows, options.egress);
         }
-        : function(rows) { return rows; }
+        : function(rows) { return rows; };
 
     // connect to the postgres db defined in conf
     var onConnection = function(fn) {
@@ -120,6 +133,16 @@ exports.create = function(options) {
                     if (! prepared) {
                         throw error("prepared statement not found", {name: key});
                     }
+                    if (values && !_.isArray(values[0]) && _.isObject(values[0])) {
+                        //then assume we have named params
+                        if (!prepared.namedParams) {
+                            throw error("prepared statement does not have named params defined", {name: key});
+                        }
+                        var namedValues = values[0];
+                        values = _.map(prepared.namedParams, function(paramName) {
+                            return namedValues[paramName];
+                        });
+                    }
                     var opts = {
                         name: key,
                         text: prepared.text,
@@ -146,6 +169,7 @@ exports.create = function(options) {
                                 throw err;
                             }
                         }
+                        console.log(err, {key: key, values: values});
                         throw error('exec failed', {key: key, values: values}, err);
                     });
                 };
@@ -251,8 +275,33 @@ exports.create = function(options) {
         return stashing;
     };
 
+    function prepare(key, types, text, path, fname) {
+        var stash = function(text, namedParams) {
+            db.__prepared[key] = {
+                name: key,
+                text: text,
+                types: types,
+                namedParams: namedParams
+            };
+        };
+        if (text) {
+            stash(text);
+            return when(key);
+        }
+        var reading = loadQuery(path, fname)
+        .then(function(text) {
+            stash(text, parseNamedParams(text));
+        })
+        .then(function() {
+            return key;
+        }, function(err) {
+            throw error("Failed to prepare", {key: key}, err);
+        });
+        return reading;
+    }
+
     db.prepare = function() {
-        var key, text, types;
+        var key, text, types, path, fname;
         assert(arguments.length <= 3);
         key = arguments[0];
         if (_.isString(arguments[1])) {
@@ -261,32 +310,36 @@ exports.create = function(options) {
         } else if (arguments.length === 2) {
             types = arguments[1];
         }
-        var stash = function(text) {
-            db.__prepared[key] = {
-                name: key,
-                text: text,
-                types: types
-            };
-        };
-        if (text) {
-            stash(text);
-            return when(key);
+        if (!text) {
+            path = db.__loadpath;
+            fname = key + '.sql';
         }
-        var reading = loadQuery(db.__loadpath, key+'.sql').then(stash)
-        .then(function() {
-            return key;
-        }, function(err) {
-            throw error("Failed to prepare", {key: key}, err);
+        return prepare(key, types, text, path, fname);
+    };
+
+    db.prepareDir = function(path) {
+        return nodefn.call(fs.readdir, path)
+        .then(function(files) {
+            var sqlFiles = _.filter(files, function(file) {
+                return file.slice(-4) === '.sql';
+            });
+            return when.all(
+                _.map(sqlFiles, function(file) {
+                    var key = file.slice(0, -4);
+                    return prepare(key, null, null, path, file);
+                }));
         });
-        return reading;
     };
 
     db.prepareAll = function(/* statements */) {
+        console.log(arguments);
         return when.join(
             _.map(arguments, function(arg) {
                 if (_.isString(arg)) {
                     return db.prepare(arg);
                 }
+                //arrays are used to pass through statement name
+                //as well as argument types
                 return db.prepare.apply(null, arg);
             })
         ).then( function(results) {

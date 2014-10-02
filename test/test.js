@@ -7,7 +7,7 @@ var when = require("when")
 , assert = require("assert");
 
 var pgconf = {};
-_.each(['host', 'database', 'user', 'port', 'password'], function(key) {
+_.each(['host', 'database', 'user', 'port', 'password', 'url'], function(key) {
     var envKey = 'POSTGRES_'+key.toUpperCase();
     if (!process.env[envKey]) return;
     pgconf[key] = process.env[envKey];
@@ -36,7 +36,7 @@ suite("db easy", function() {
     };
 
     var createDb = function(testOpts) {
-        return dbeasy.create( _.extend(_.clone(pgconf), testOpts) );
+        return dbeasy.connect( _.extend(_.clone(pgconf), testOpts) );
     };
 
     setup(function(done) {
@@ -199,6 +199,47 @@ suite("db easy", function() {
             assert.equal(result.length, 2);
             done();
         }).otherwise(done);
+    });
+
+    test("prepare all statements in a directory", function(done) {
+        db = createDb({loadpath: __dirname, poolSize:10});
+
+        db.prepareDir(__dirname + '/test_sql')
+        .then(function() { return db.exec('select_1') })
+        .then(function(rows) { assert.equal(rows[0].one, 1); })
+        .then(function() { return db.exec('select_2') })
+        .then(function(rows) { assert.equal(rows[0].two, 2); })
+        .then(done, done);
+    });
+
+    test("parseNamedParams", function() {
+        var text = (
+            "--" +
+            "-- $1: foo" +
+            "-- $2: bar" +
+            "--"
+        );
+
+        var actual = dbeasy.parseNamedParams(text);
+        assert.equal(actual[0], 'foo');
+        assert.equal(actual[1], 'bar');
+    });
+
+    test("prepare statemnt with named args", function(done) {
+        db = createDb({loadpath: __dirname, poolSize:10});
+
+        db.prepare('select_named_args')
+        .then(function() {
+            return db.exec('select_named_args', {
+                foo: 'F',
+                bar: 'B'
+            });
+        })
+        .then(function(rows) {
+            assert.equal(rows[0].foo, 'F');
+            assert.equal(rows[0].bar, 'B');
+        })
+        .then(done, done);
     });
 
     test("prepare a statement from a template", function(done) {
