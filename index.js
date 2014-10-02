@@ -2,12 +2,10 @@
 
 var pg = require('pg')
 , assert = require('assert')
-, nodefn = require('when/node/function')
 , _ = require('lodash')
 , _str = require('underscore.string')
-, fs = require('fs')
-, when = require('when')
-, whenfn = require('when/function')
+, Promise = require('bluebird')
+, fs = Promise.promisifyAll(require('fs'))
 , handlebars = require('handlebars');
 
 
@@ -26,7 +24,7 @@ function conString(pgconf) {
 }
 
 function loadQuery(loadpath, fileName) {
-    return nodefn.call(fs.readFile, loadpath+"/"+fileName).then(function(data) {
+    return fs.readFileAsync(loadpath+"/"+fileName).then(function(data) {
         return data.toString();
     });
 }
@@ -95,12 +93,14 @@ exports.connect = function(options) {
         }
         : function(rows) { return rows; };
 
+    pg = Promise.promisifyAll(pg);
     // connect to the postgres db defined in conf
     var onConnection = function(fn) {
-        return nodefn.call(_.bind(pg.connect, pg, conString(options)))
+        return pg.connectAsync(conString(options))
             .then(function(args) {
                 var ctx = {};
                 var conn = args[0];
+                var connQuery = Promise.promisify(conn.query, conn);
                 var done = args[1];
 
                 ctx.__conn = conn;
@@ -108,22 +108,22 @@ exports.connect = function(options) {
                     conn.query('BEGIN');
                 };
                 ctx.end = function() {
-                    return nodefn.call(_.bind(conn.query, conn), 'END');
+                    return connQuery('END');
                 };
                 ctx.query = function(text, vals) {
                     if (vals !== undefined) { vals = _.rest(arguments); }
-                    return nodefn.call(_.bind(conn.query, conn), text, vals)
+                    return connQuery(text, vals)
                         .then(function(result) {
                             return result.rows ? egress(result.rows) : null;
                         })
-                        .otherwise(function(err) {
+                        .catch(function(err) {
                             throw error('query failed', {text: text, vals: vals}, err);
                         });
                 };
                 ctx.queryRaw = function(text, vals) {
                     if (vals !== undefined) { vals = _.rest(arguments); }
-                    return nodefn.call(_.bind(conn.query, conn), text, vals)
-                        .otherwise(function(err) {
+                    return connQuery(text, vals)
+                        .catch(function(err) {
                             throw error('queryRaw failed', {text: text, vals: vals}, err);
                         });
                 };
@@ -149,10 +149,10 @@ exports.connect = function(options) {
                         values: values,
                         types: prepared.types
                     };
-                    return nodefn.call(_.bind(conn.query, conn), opts).then(function(result) {
+                    return connQuery(opts).then(function(result) {
                         return result.rows ? egress(result.rows) : null;
                     })
-                    .otherwise(function(err) {
+                    .catch(function(err) {
                         if (err && err.code) {
                             if (err.code.search("22") === 0) {
                                 // Codes in the 22* range (data exceptions) are assumed
@@ -175,16 +175,16 @@ exports.connect = function(options) {
                 };
 
                 var rollback = function(err) {
-                    return nodefn.call(_.bind(conn.query, conn), "ROLLBACK").then(function() {
+                    return connQuery("ROLLBACK").then(function() {
                         throw err;
                     });
                 };
 
-                return whenfn.call(function() { return fn(ctx); })
-                .otherwise(rollback)
-                .ensure(done);
+                return Promise.try(function() { return fn(ctx); })
+                .catch(rollback)
+                .finally(done);
 
-            }).otherwise(function(err) {
+            }).catch(function(err) {
                 throw err;
             });
     };
@@ -230,7 +230,9 @@ exports.connect = function(options) {
             conn.begin();
             var working = workFn(conn);
             return working.then(function() {
-                return conn.end().yield(working);
+                return conn.end().then(function() {
+                    return working;
+                });
             });
         });
     };
@@ -286,7 +288,7 @@ exports.connect = function(options) {
         };
         if (text) {
             stash(text);
-            return when(key);
+            return Promise.resolve(key);
         }
         var reading = loadQuery(path, fname)
         .then(function(text) {
@@ -318,12 +320,12 @@ exports.connect = function(options) {
     };
 
     db.prepareDir = function(path) {
-        return nodefn.call(fs.readdir, path)
+        return fs.readdirAsync(path)
         .then(function(files) {
             var sqlFiles = _.filter(files, function(file) {
                 return file.slice(-4) === '.sql';
             });
-            return when.all(
+            return Promise.all(
                 _.map(sqlFiles, function(file) {
                     var key = file.slice(0, -4);
                     return prepare(key, null, null, path, file);
@@ -333,7 +335,7 @@ exports.connect = function(options) {
 
     db.prepareAll = function(/* statements */) {
         console.log(arguments);
-        return when.join(
+        return Promise.all(
             _.map(arguments, function(arg) {
                 if (_.isString(arg)) {
                     return db.prepare(arg);

@@ -1,8 +1,7 @@
 "use strict";
 /*global suite: false, test: false, setup: false*/
-var when = require("when")
-, delay = require("when/delay")
-, _ = require("underscore")
+var Promise = require("bluebird")
+, _ = require("lodash")
 , dbeasy = require("../index.js")
 , assert = require("assert");
 
@@ -19,20 +18,20 @@ suite("db easy", function() {
 
     var createTestTable = function(db) {
         return db.onConnection( function(conn) {
-            return when.join(
+            return Promise.all([
                 conn.query("CREATE TABLE foo (bar int);"),
                 conn.query("CREATE TABLE fooid (id int, bar int);")
-            );
-        }).yield();
+            ]);
+        }).then(_.noop);
     };
 
     var dropTestTable = function(db) {
         return db.onConnection( function(conn) {
-            return when.join(
+            return Promise.all([
                 conn.query("DROP TABLE IF EXISTS foo;"),
                 conn.query("DROP TABLE IF EXISTS fooid;")
-            );
-        }).yield();
+            ]);
+        }).then(_.noop);
     };
 
     var createDb = function(testOpts) {
@@ -49,7 +48,7 @@ suite("db easy", function() {
                     db = null;
                     done();
                 });
-            }).otherwise(done);
+            }).catch(done);
         } else {
             done();
         }
@@ -57,8 +56,9 @@ suite("db easy", function() {
 
     test("create a db", function(done) {
         db = createDb();
-        db.query("select 1").yield()
-        .then(function(){done();}).otherwise(console.log);
+        db.query("select 1")
+        .then(function(){done();})
+        .catch(done);
 
     });
 
@@ -94,19 +94,19 @@ suite("db easy", function() {
         db = createDb({poolSize: 1});
         var gotConnection = _.map(_.range(10), function() { return false; });
 
-        var connecting = when.all(
+        Promise.all(
             _.map(_.range(10), function(i) {
                 return db.onConnection(function() {
                     gotConnection[i] = true;
-                    return delay(20);
+                    return Promise.delay(20);
                 });
             })
-        ).yield();
-
-        connecting.then( function() {
+        )
+        .then( function() {
             assert(_.all(gotConnection), "Got all connections");
             done();
-        }).otherwise(done);
+        })
+        .catch(done);
     });
 
     test("don't deadlock on sequential connection requests", function(done) {
@@ -115,39 +115,39 @@ suite("db easy", function() {
 
         var connecting = db.onConnection( function() {
             gotConnection[0] = true;
-            return delay(20);
+            return Promise.delay(20);
         }).then( function() {
             return db.onConnection( function() {
                 gotConnection[1] = true;
-                return delay(20);
+                return Promise.delay(20);
             });
         }).then( function() {
             return db.onConnection( function() {
                 gotConnection[2] = true;
-                return delay(20);
+                return Promise.delay(20);
             });
         });
 
         connecting.then( function() {
             assert(_.all(gotConnection), "Got all connections");
             done();
-        }).otherwise(done);
+        }).catch(done);
     });
 
     test("rollback on application exception when in transaction", function(done) {
         db = createDb({poolSize: 1});
         var inserting = db.transaction( function(conn) {
             var querying = conn.query("INSERT INTO foo VALUES (DEFAULT);");
-            var erroring = when.reject("error");
-            return when.join(querying, erroring);
+            var erroring = Promise.reject("error");
+            return Promise.all([querying, erroring]);
         });
 
-        inserting.otherwise(function() {
+        inserting.catch(function() {
             return db.query("SELECT count(*) from foo;").then( function(result) {
                 assert.equal(result[0].count, '0');
                 done();
             });
-        }).otherwise(done);
+        }).catch(done);
     });
 
     test("rollback on db error when in transaction", function(done) {
@@ -155,31 +155,31 @@ suite("db easy", function() {
         var inserting = db.transaction( function(conn) {
             var querying = conn.query("INSERT INTO foo VALUES (DEFAULT);");
             var erroring = conn.query("bogus");
-            return when.join(querying, erroring);
+            return Promise.all([querying, erroring]);
         });
 
-        inserting.otherwise(function() {
+        inserting.catch(function() {
             return db.query("SELECT count(*) from foo;").then( function(result) {
                 assert.equal(result[0].count, '0');
                 done();
             });
-        }).otherwise(done);
+        }).catch(done);
     });
 
     test("raw connection does not auto rollback", function(done) {
         db = createDb({poolSize: 1});
         var inserting = db.onConnection( function(conn) {
             var querying = conn.query("INSERT INTO foo VALUES (DEFAULT);");
-            var erroring = when.reject("error");
-            return when.join(querying, erroring);
+            var erroring = Promise.reject("error");
+            return Promise.all([querying, erroring]);
         });
 
-        inserting.otherwise(function() {
+        inserting.catch(function() {
             return db.query("SELECT count(*) from foo;").then( function(result) {
                 assert.equal(result[0].count, '1');
                 done();
             });
-        }).otherwise(done);
+        }).catch(done);
     });
 
     test("prepare a statement", function(done) {
@@ -198,7 +198,7 @@ suite("db easy", function() {
         querying.then(function(result) {
             assert.equal(result.length, 2);
             done();
-        }).otherwise(done);
+        }).catch(done);
     });
 
     test("prepare all statements in a directory", function(done) {
@@ -260,7 +260,7 @@ suite("db easy", function() {
             assert.equal(result[0].bar, 4);
             assert.equal(result[1].bar, 3);
             done();
-        }).otherwise(done);
+        }).catch(done);
     });
 
 
@@ -276,7 +276,7 @@ suite("db easy", function() {
             function again(db) {
                 if (counter === 200) return;
 
-                return when.all([
+                return Promise.all([
                     db.exec('update_stmt'),
                     db.exec('update_stmt'),
                     db.exec('update_stmt'),
@@ -291,7 +291,7 @@ suite("db easy", function() {
                 });
             }
             return again(db);
-        }).otherwise(function(err) {console.log(err.cause); throw err;}).then(function() {done();}, done);
+        }).catch(function(err) {console.log(err.cause); throw err;}).then(function() {done();}, done);
 
     });
 
