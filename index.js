@@ -84,6 +84,7 @@ exports.connect = function(options) {
     options = options || {};
     var db = {};
     db.__prepared = {};
+    db.__templates = {};
     db.__loadpath = options.loadpath || "";
     var requestedPoolSize = options.poolSize || pg.defaults.poolSize;
     pg.defaults.poolSize = requestedPoolSize;
@@ -127,16 +128,30 @@ exports.connect = function(options) {
                             throw error('queryRaw failed', {text: text, vals: vals}, err);
                         });
                 };
+                ctx.execTemplate = function(templateKey, templateParams, values) {
+                    var key = templateKey + JSON.stringify(templateParams);
+                    if (db.__prepared[key]) {
+                        return ctx.exec(key, values);
+                    }
+
+                    var template = db.__templates[templateKey];
+                    if (! template) {
+                        throw error("template not found: " + templateKey);
+                    }
+                    var text = template(templateParams);
+                    prepare(key, null, text);
+                    return ctx.exec(key, values);
+                };
                 ctx.exec = function(key, values) {
                     if (values !== undefined) { values = _.rest(arguments); }
                     var prepared = db.__prepared[key];
                     if (! prepared) {
-                        throw error("prepared statement not found", {name: key});
+                        throw error("prepared statement not found: " + key);
                     }
                     if (values && !_.isArray(values[0]) && _.isObject(values[0])) {
                         //then assume we have named params
                         if (!prepared.namedParams) {
-                            throw error("prepared statement does not have named params defined", {name: key});
+                            throw error("prepared statement does not have named params defined: " + key);
                         }
                         var namedValues = values[0];
                         values = _.map(prepared.namedParams, function(paramName) {
@@ -196,10 +211,17 @@ exports.connect = function(options) {
 
 
     // Execute a previously prepared statement
-    db.exec = function(statement /*, params*/) {
+    db.exec = function(/*statement, params*/) {
         var args = _.toArray(arguments);
         return db.onConnection(function(conn) {
             return conn.exec.apply(conn, args);
+        });
+    };
+
+    db.execTemplate = function(/*statement, templateParams, params*/) {
+        var args = _.toArray(arguments);
+        return db.onConnection(function(conn) {
+            return conn.execTemplate.apply(conn, args);
         });
     };
 
@@ -277,6 +299,13 @@ exports.connect = function(options) {
         return stashing;
     };
 
+    function compileTemplate(key, path, fname) {
+        return loadQuery(path, fname)
+        .then(function(text) {
+            db.__templates[key] = handlebars.compile(text);
+        });
+    }
+
     function prepare(key, types, text, path, fname) {
         var stash = function(text, namedParams) {
             db.__prepared[key] = {
@@ -287,7 +316,7 @@ exports.connect = function(options) {
             };
         };
         if (text) {
-            stash(text);
+            stash(text, parseNamedParams(text));
             return Promise.resolve(key);
         }
         var reading = loadQuery(path, fname)
@@ -297,6 +326,7 @@ exports.connect = function(options) {
         .then(function() {
             return key;
         }, function(err) {
+            console.log(err);
             throw error("Failed to prepare", {key: key}, err);
         });
         return reading;
@@ -312,8 +342,19 @@ exports.connect = function(options) {
         } else if (arguments.length === 2) {
             types = arguments[1];
         }
-        if (!text) {
-            path = db.__loadpath;
+        if (text) return prepare(key, types, text);
+
+        path = db.__loadpath;
+        if (key.slice(-8) === '.sql.hbs') {
+            fname = key;
+            key = key.slice(0, -8);
+            return compileTemplate(key, path, fname);
+        }
+
+        if (key.slice(-4) === '.sql') {
+            fname = key;
+            key = key.slice(0, -4);
+        } else {
             fname = key + '.sql';
         }
         return prepare(key, types, text, path, fname);
@@ -323,10 +364,17 @@ exports.connect = function(options) {
         return fs.readdirAsync(path)
         .then(function(files) {
             var sqlFiles = _.filter(files, function(file) {
-                return file.slice(-4) === '.sql';
+                return (
+                       file.slice(-4) === '.sql'
+                    || file.slice(-8) === '.sql.hbs'
+                );
             });
             return Promise.all(
                 _.map(sqlFiles, function(file) {
+                    if (file.slice(-8) === '.sql.hbs') {
+                        key = file.slice(0, -8);
+                        return compileTemplate(key, path, file);
+                    }
                     var key = file.slice(0, -4);
                     return prepare(key, null, null, path, file);
                 }));
@@ -334,7 +382,6 @@ exports.connect = function(options) {
     };
 
     db.prepareAll = function(/* statements */) {
-        console.log(arguments);
         return Promise.all(
             _.map(arguments, function(arg) {
                 if (_.isString(arg)) {
