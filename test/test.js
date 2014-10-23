@@ -1,16 +1,10 @@
 "use strict";
 /*global suite: false, test: false, setup: false*/
-var Promise = require("bluebird")
-, _ = require("lodash")
-, dbeasy = require("../index.js")
-, assert = require("assert");
-
-var pgconf = {};
-_.each(['host', 'database', 'user', 'port', 'password', 'url'], function(key) {
-    var envKey = 'POSTGRES_'+key.toUpperCase();
-    if (!process.env[envKey]) return;
-    pgconf[key] = process.env[envKey];
-});
+var Promise = require("bluebird"),
+    _ = require("lodash"),
+    dbeasy = require("../index.js"),
+    assert = require("assert"),
+    createDb = require("./util").createDb;
 
 suite("db easy", function() {
 
@@ -34,24 +28,19 @@ suite("db easy", function() {
         }).then(_.noop);
     };
 
-    var createDb = function(testOpts) {
-        return dbeasy.connect( _.extend(_.clone(pgconf), testOpts) );
-    };
 
     setup(function(done) {
         if (db) {
             db.close();
-            db = createDb({poolSize: 1});
-            dropTestTable(db).then(function() {
-                return createTestTable(db).then(function() {
-                    db.close();
-                    db = null;
-                    done();
-                });
-            }).catch(done);
-        } else {
-            done();
         }
+        db = createDb({poolSize: 1});
+        dropTestTable(db).then(function() {
+            return createTestTable(db).then(function() {
+                db.close();
+                db = null;
+                done();
+            });
+        }).catch(done);
     });
 
     test("create a db", function(done) {
@@ -86,7 +75,7 @@ suite("db easy", function() {
             assert.equal(gotFirstConnection, true);
             assert.equal(gotSecondConnection, false);
             done();
-        }, 100);
+        }, 1000);
 
     });
 
@@ -205,9 +194,9 @@ suite("db easy", function() {
         db = createDb({loadpath: __dirname, poolSize:10});
 
         db.prepareDir(__dirname + '/test_sql')
-        .then(function() { return db.exec('select_1') })
+        .then(function() { return db.exec('select_1'); })
         .then(function(rows) { assert.equal(rows[0].one, 1); })
-        .then(function() { return db.exec('select_2') })
+        .then(function() { return db.execTemplate('select_2'); })
         .then(function(rows) { assert.equal(rows[0].two, 2); })
         .then(done, done);
     });
@@ -295,7 +284,7 @@ suite("db easy", function() {
         return db.query('INSERT INTO fooid VALUES (0, 0);')
         .then(function() {
             function again(db) {
-                if (counter === 200) return;
+                if (counter === 10) return;
 
                 return Promise.all([
                     db.exec('update_stmt'),

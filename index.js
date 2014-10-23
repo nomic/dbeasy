@@ -1,6 +1,6 @@
 "use strict";
 
-var pg = require('pg')
+var pg = require('pg').native
 , assert = require('assert')
 , _ = require('lodash')
 , _str = require('underscore.string')
