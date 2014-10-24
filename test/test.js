@@ -6,7 +6,7 @@ var Promise = require("bluebird"),
     assert = require("assert"),
     createDb = require("./util").createDb;
 
-suite("db easy", function() {
+suite("Core", function() {
 
     var db;
 

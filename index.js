@@ -6,7 +6,8 @@ var pg = require('pg').native
 , _str = require('underscore.string')
 , Promise = require('bluebird')
 , fs = Promise.promisifyAll(require('fs'))
-, handlebars = require('handlebars');
+, handlebars = require('handlebars')
+, path = require('path');
 
 
 function conString(pgconf) {
@@ -30,11 +31,11 @@ function loadQuery(loadpath, fileName) {
 }
 
 function error(msg, detail, cause) {
-    var err = new Error(msg);
+    var err = new Error(msg + ' '
+        + JSON.stringify(detail)
+        + '\n' + (cause ? cause.stack : ''));
     Error.captureStackTrace(err, error);
     err.name = "DBEasyError";
-    err.detail = detail || {};
-    if (cause) err.cause = cause;
     return err;
 }
 
@@ -75,6 +76,47 @@ exports.camelizeColumnNames = function(row) {
     return r;
 };
 
+exports.simpleStore = function(options) {
+    var ss = exports.connect(options);
+
+    ss.prepareDir(path.join(__dirname, 'templates'));
+
+    ss.defineSchema = function(name) {
+        return ss.query('CREATE SCHEMA ' + name +';');
+    };
+
+    ss.defineEntity = function(name, opts) {
+        return ss.execTemplate('__create_entity', {
+            tableName: _str.underscored(name)
+        });
+    };
+
+    ss.upsert = function(name, data) {
+        return (
+          data.id
+            ? ss.exectTemplate('__update', {
+                tableName: _str.underscored(name)
+              })
+            : ss.execTemplate('__insert', {
+                tableName: _str.underscored(name)
+              })
+        );
+    };
+
+    ss.getById = function(name, id) {
+        return ss.getByIds(name, [id])
+        .then(_.first);
+    };
+
+    ss.getByIds = function(name, ids) {
+        return ss.execTemplate('__get_by_ids', {
+            tableName: _str.underscored(name)
+        }, ids);
+    };
+
+    return ss;
+};
+
 exports.connect = function(options) {
     var logger = options.logger || {
         debug: function(){},
@@ -113,20 +155,27 @@ exports.connect = function(options) {
                 };
                 ctx.query = function(text, vals) {
                     if (vals !== undefined) { vals = _.rest(arguments); }
-                    return connQuery(text, vals)
-                        .then(function(result) {
-                            return result.rows ? egress(result.rows) : null;
-                        })
-                        .catch(function(err) {
-                            throw error('query failed', {text: text, vals: vals}, err);
-                        });
+                    return ctx.queryRaw(text, vals)
+                    .then(function(result) {
+                        return result.rows ? egress(result.rows) : null;
+                    });
                 };
                 ctx.queryRaw = function(text, vals) {
                     if (vals !== undefined) { vals = _.rest(arguments); }
-                    return connQuery(text, vals)
-                        .catch(function(err) {
-                            throw error('queryRaw failed', {text: text, vals: vals}, err);
-                        });
+                    var statements = _.isArray(text) ? text : [text];
+                    return (function next(results) {
+                        var statement = statements.shift();
+                        if (!statement) return results.pop();
+
+                        return connQuery(text, vals)
+                            .then(function(result) {
+                                results.push(result);
+                                return next(results);
+                            })
+                            .catch(function(err) {
+                                throw error('queryRaw failed', {text: text, vals: vals}, err);
+                            });
+                    })([]);
                 };
                 ctx.execTemplate = function(templateKey, templateParams, values) {
                     var key = templateKey + JSON.stringify(templateParams);
@@ -158,35 +207,43 @@ exports.connect = function(options) {
                             return namedValues[paramName];
                         });
                     }
-                    var opts = {
-                        name: key,
-                        text: prepared.text,
-                        values: values,
-                        types: prepared.types
-                    };
-                    return connQuery(opts).then(function(result) {
-                        return result.rows ? egress(result.rows) : null;
-                    })
-                    .catch(function(err) {
-                        if (err && err.code) {
-                            if (err.code.search("22") === 0) {
-                                // Codes in the 22* range (data exceptions) are assumed
-                                // to be the client's fault (ie, using an id which
-                                // is beyond the range representable by bigint).
-                                // - reference: http://www.postgresql.org/docs/9.2/static/errcodes-appendix.html
-                                throw error(opts.name || "anonymous query", opts, err);
-                            } else if (err.code.search("23") === 0) {
-                                // Integrity constraint violation, just rethrow it
-                                // and allow higher-lever wrappers to take action.
-                                throw err;
-                            } else if (err.code.search("40P01") === 0) {
-                                //TODO:2013-06-28:gsilk: special logging for deadlocks?
-                                throw err;
+
+                    var statements = prepared.text.split(/;\s*$/m);
+                    return (function next(results) {
+                        var statement = statements.shift();
+                        if (!statement) return results.pop();
+
+                        var opts = {
+                            name: results.length + '.' + key,
+                            text: statement + ';',
+                            values: values,
+                            types: prepared.types
+                        };
+                        return connQuery(opts).then(function(result) {
+                            results.push(result.rows ? egress(result.rows) : null);
+                            return next(results);
+                        })
+                        .catch(function(err) {
+                            if (err && err.code) {
+                                if (err.code.search("22") === 0) {
+                                    // Codes in the 22* range (data exceptions) are assumed
+                                    // to be the client's fault (ie, using an id which
+                                    // is beyond the range representable by bigint).
+                                    // - reference: http://www.postgresql.org/docs/9.2/static/errcodes-appendix.html
+                                    throw error(opts.name || "anonymous query", opts, err);
+                                } else if (err.code.search("23") === 0) {
+                                    // Integrity constraint violation, just rethrow it
+                                    // and allow higher-lever wrappers to take action.
+                                    throw err;
+                                } else if (err.code.search("40P01") === 0) {
+                                    //TODO:2013-06-28:gsilk: special logging for deadlocks?
+                                    throw err;
+                                }
                             }
-                        }
-                        console.log(err, {key: key, values: values});
-                        throw error('exec failed', {key: key, values: values}, err);
-                    });
+                            console.log(err, {key: key, values: values});
+                            throw error('exec failed', {key: key, values: values}, err);
+                        });
+                    })([]);
                 };
 
                 var rollback = function(err) {

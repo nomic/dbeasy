@@ -1,0 +1,6 @@
+--
+-- $1: id
+--
+SELECT *
+  FROM {{tableName}}
+ WHERE id = ANY($1::bigint[]);

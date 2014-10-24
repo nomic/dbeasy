@@ -1,0 +1,16 @@
+CREATE TABLE {{tableName}} (
+  id bigint NOT NULL,
+  created timestamp without time zone DEFAULT now() NOT NULL,
+  updated timestamp without time zone DEFAULT now() NOT NULL,
+  deleted timestamp without time zone
+);
+
+CREATE SEQUENCE {{tableName}}_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER TABLE ONLY {{tableName}} ALTER COLUMN id SET DEFAULT nextval('{{tableName}}_id_seq'::regclass);
+ALTER TABLE ONLY {{tableName}} ADD CONSTRAINT "{{tableName}}_pkey" PRIMARY KEY (id);
