@@ -20,7 +20,7 @@ suite("Simple Store", function() {
         return store.addNamespace('foo');
       })
       .then(function() {
-        return store.addType('foo.fooBar');
+        return store.addSpec('foo.fooBar');
       })
       .then(function() {
         return store.query('SELECT * FROM foo.foo_bar;')
@@ -72,7 +72,7 @@ suite("Simple Store", function() {
         return store.addNamespace('biz');
       })
       .then(function() {
-        return store.addType('biz.emp', {
+        return store.addSpec('biz.emp', {
           fields: {
             firstName: 'text NOT NULL'
           },
@@ -107,6 +107,46 @@ suite("Simple Store", function() {
         expect(result).to.have.property('interests');
         expect(result.interests).to.eql({favoriteSandwich: 'Falafel'});
         expect(result).to.not.have.property('dept');
+      });
+
+    });
+
+    test("Update a spec", function() {
+      var store = ss({poolSize: 2});
+      return store.query('DROP SCHEMA biz CASCADE;')
+      .catch(_.noop)
+      .then(function() {
+        return store.addNamespace('biz');
+      })
+      .then(function() {
+        return store.addSpec('biz.emp', {
+          fields: {
+            firstName: 'text NOT NULL'
+          },
+        });
+      })
+      .then(function() {
+        return store.addSpec('biz.emp', {
+          fields: {
+            firstName: 'text'
+          },
+          ref: {
+            dept: 'bigint'
+          }
+        });
+      })
+      .then(function() {
+        return store.upsert('biz.emp', {
+          creator: {id: '3'},
+          dept: {id: '2'}
+        }).then(function(emp) {
+          return store.getById('biz.emp', emp.id);
+        });
+      })
+      .then(function(result) {
+        expect(result).to.not.have.property('firstName');
+        expect(result).to.have.property('dept');
+        expect(result.dept).to.eql({id: '2'});
       });
 
     });

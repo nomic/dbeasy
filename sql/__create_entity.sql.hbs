@@ -1,3 +1,6 @@
+DROP TABLE IF EXISTS {{tableName}} CASCADE;
+DROP SEQUENCE IF EXISTS {{tableName}}_id_seq CASCADE;
+
 CREATE TABLE {{tableName}} (
   id bigint NOT NULL,
   creator_id bigint NOT NULL,

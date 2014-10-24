@@ -8,8 +8,10 @@ var pg = require('pg').native
 , fs = Promise.promisifyAll(require('fs'))
 , handlebars = require('handlebars')
 , path = require('path')
+, crypto = require('crypto')
 , SYS_COL_PREFIX = '__'
 , BAG_COL = SYS_COL_PREFIX + 'bag';
+
 
 
 function conString(pgconf) {
@@ -116,8 +118,24 @@ exports.simpleStore = function(options) {
     });
     var ss = exports.connect(options);
     ss.prepareDir(path.join(__dirname, 'sql'));
-    var onTypeInfo = Promise.resolve({});
+    var onTableInfo = Promise.resolve({});
     var onNamespaces = Promise.resolve({});
+
+    var onSavedSpecs = (function getSavedSpecs() {
+        return ss.query([
+            'SELECT * FROM information_schema.tables',
+            ' WHERE table_name=\'spec\'',
+            '   AND table_schema=\'simple_store\';'].join('\n'))
+        .then(function(rows) {
+            return (rows.length
+                ? ss.query('SELECT * FROM simple_store.spec;')
+                : ss.exec('__create_spec_table')
+                    .then(function() {
+                        return [];
+                    })
+            );
+        });
+    })();
 
     function fieldsToDDL(fields, isRefs) {
         return _.transform(fields, function(ddl, spec, name) {
@@ -138,18 +156,29 @@ exports.simpleStore = function(options) {
         });
     }
 
-    function typeInfo(typeName) {
-        return onTypeInfo
-        .then(function(typeInfo) {
-            if (!typeInfo[typeName]) throw new Error('Unkown type: ' + typeName);
-            return typeInfo[typeName];
+    function tableInfo(specName) {
+        return onTableInfo
+        .then(function(tableInfo) {
+            if (!tableInfo[specName]) throw new Error('Unkown spec: ' + specName);
+            return tableInfo[specName];
         });
     }
 
-    function getInsertContext(typeName, data) {
-        return typeInfo(typeName)
-        .then(function(aTypeInfo) {
-            var cols = aTypeInfo.columns;
+    function getSavedSpec(fullName) {
+        return onSavedSpecs
+        .then(function(specs) {
+            return _.where(specs, {name: fullName}) || null;
+        });
+    }
+
+    function saveSpec(fullName, spec) {
+        return ss.exec('__save_spec', {name: fullName, spec: spec});
+    }
+
+    function getInsertContext(specName, data) {
+        return tableInfo(specName)
+        .then(function(atableInfo) {
+            var cols = atableInfo.columns;
             console.log("COLNAMES", colNames);
             var inputData = {};
             var fieldNames = [];
@@ -207,7 +236,7 @@ exports.simpleStore = function(options) {
             return {
                 inputData: inputData,
                 templateVars: {
-                    tableName: _str.underscored(typeName),
+                    tableName: _str.underscored(specName),
                     bindVars: bindVars,
                     colNamesStr: colNames.join(', '),
                     colValsStr: colVals.join(', ')
@@ -233,24 +262,32 @@ exports.simpleStore = function(options) {
         });
     };
 
-    ss.addType = function(name, spec) {
-        var nameParts = name.split('.');
-        var type = (nameParts.length > 1) ? nameParts[1] : nameParts[0],
+    ss.addSpec = function(fullName, spec) {
+        var nameParts = fullName.split('.');
+        var name = (nameParts.length > 1) ? nameParts[1] : nameParts[0],
             namespace = (nameParts.length > 1) ? nameParts[0] : null,
             schema = _str.underscored(namespace),
-            table = _str.underscored(type);
+            table = _str.underscored(name);
 
         spec = _.defaults(spec || {}, {
             fields: {},
             refs: {}
         });
-        return requireNamespace(namespace)
-        .then(function() {
-            return ss.execTemplate('__create_entity', {
-                tableName: schema + '.' + table,
-                columnDefinitions: fieldsToDDL(spec.fields),
-                refDefinitions: fieldsToDDL(spec.refs, true)
-            });
+        return Promise.all([
+            getSavedSpec(fullName),
+            requireNamespace(namespace)
+        ])
+        .spread(function(savedSpec) {
+            if (! _.isEqual(spec, savedSpec)) {
+                return ss.execTemplate('__create_entity', {
+                    tableName: schema + '.' + table,
+                    columnDefinitions: fieldsToDDL(spec.fields),
+                    refDefinitions: fieldsToDDL(spec.refs, true)
+                })
+                .then(function() {
+                    return saveSpec(fullName, spec);
+                });
+            }
         })
         .then(function() {
             return ss.exec('__get_table_info', {
@@ -259,9 +296,9 @@ exports.simpleStore = function(options) {
             });
         })
         .then(function(info) {
-            onTypeInfo = onTypeInfo.then(function(typeInfo) {
-                typeInfo[name] = {columns: info};
-                return typeInfo;
+            onTableInfo = onTableInfo.then(function(tableInfo) {
+                tableInfo[fullName] = {columns: info};
+                return tableInfo;
             });
         });
     };
@@ -378,6 +415,12 @@ exports.connect = function(options) {
                 };
                 ctx.execTemplate = function(templateKey, templateParams, values) {
                     var key = templateKey + JSON.stringify(templateParams);
+
+                    // Max length of prepared statement is NAMEDATALEN (64)
+                    var md5sum = crypto.createHash('md5');
+                    md5sum.update(key);
+                    key = md5sum.digest('hex');
+
                     if (db.__prepared[key]) {
                         return ctx.exec(key, values);
                     }
