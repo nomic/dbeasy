@@ -1,0 +1,6 @@
+--{{#each bindVars}}
+-- ${{@key}}: {{this}}{{/each}}
+--
+UPDATE {{tableName}} SET ({{colNamesStr}}) = ({{colValsStr}})
+ WHERE id = $1
+RETURNING *;

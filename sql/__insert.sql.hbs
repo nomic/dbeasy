@@ -1,0 +1,6 @@
+--{{#each bindVars}}
+-- ${{@key}}: {{this}}{{/each}}
+--
+INSERT INTO {{tableName}} ({{colNamesStr}})
+VALUES ({{colValsStr}})
+RETURNING *;

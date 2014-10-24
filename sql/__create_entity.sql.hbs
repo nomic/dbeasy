@@ -3,6 +3,11 @@ CREATE TABLE {{tableName}} (
   creator_id bigint NOT NULL,
   created timestamp without time zone DEFAULT now() NOT NULL,
   updated timestamp without time zone DEFAULT now() NOT NULL,
+  -- custom fields{{#each columnDefinitions}}
+  {{this}},{{/each}}{{#each refDefinitions}}
+  {{this}},{{/each}}
+  --
+  __bag json NOT NULL DEFAULT '{}',
   __deleted timestamp without time zone
 );
 

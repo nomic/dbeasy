@@ -8,7 +8,8 @@ var pg = require('pg').native
 , fs = Promise.promisifyAll(require('fs'))
 , handlebars = require('handlebars')
 , path = require('path')
-, SYS_COL_PREFIX = '__';
+, SYS_COL_PREFIX = '__'
+, BAG_COL = SYS_COL_PREFIX + 'bag';
 
 
 function conString(pgconf) {
@@ -73,9 +74,12 @@ exports.encodeArray = function(arr, conformer) {
     return '{' + _.map(arr, conformer).join(',') + '}';
 };
 
-exports.jsifyColumnNames = jsifyColumnNames;
-function jsifyColumnNames(row) {
+
+
+exports.jsifyColumns = jsifyColumns;
+function jsifyColumns(row) {
     return _.transform(row, function(result, val, key) {
+        if (val === null) return;
         if (key.slice(-3) === '_id')
             result[_str.camelize(key.slice(0,-3))] = {id: val};
         else
@@ -84,9 +88,19 @@ function jsifyColumnNames(row) {
     }, {});
 }
 
+function columnifyJsName(name) {
+    if (name.slice(-3) === '.id')
+        return _str.underscore(name.slice(0,-3)) + '_id';
+    else
+        return _str.underscore(name);
+}
+
 exports.removeSysColumns = removeSysColumns;
 function removeSysColumns(row) {
     return _.transform(row, function(result, val, key) {
+        if (key === '__bag') {
+            _.extend(result, val);
+        }
         if (key.slice(0, 2) !== SYS_COL_PREFIX) {
             result[key] = val;
         }
@@ -97,33 +111,183 @@ function removeSysColumns(row) {
 exports.simpleStore = function(options) {
     options = _.defaults(options, {
         egress: _.compose(
-            jsifyColumnNames,
+            jsifyColumns,
             removeSysColumns)
     });
     var ss = exports.connect(options);
+    ss.prepareDir(path.join(__dirname, 'sql'));
+    var onTypeInfo = Promise.resolve({});
+    var onNamespaces = Promise.resolve({});
 
-    ss.prepareDir(path.join(__dirname, 'templates'));
+    function fieldsToDDL(fields, isRefs) {
+        return _.transform(fields, function(ddl, spec, name) {
+            name = _str.underscored(name);
+            if (isRefs) {
+                name += '_id';
+            }
+            ddl.push([name, spec].join(' '));
+            return ddl;
+        }, []);
+    }
 
-    ss.defineSchema = function(name) {
-        return ss.query('CREATE SCHEMA ' + name +';');
+    function requireNamespace(namespace) {
+        return onNamespaces.then(function(namespaces) {
+            if (!namespaces[namespace]) {
+                throw new Error('Namespace not found: ' + namespace);
+            }
+        });
+    }
+
+    function typeInfo(typeName) {
+        return onTypeInfo
+        .then(function(typeInfo) {
+            if (!typeInfo[typeName]) throw new Error('Unkown type: ' + typeName);
+            return typeInfo[typeName];
+        });
+    }
+
+    function getInsertContext(typeName, data) {
+        return typeInfo(typeName)
+        .then(function(aTypeInfo) {
+            var cols = aTypeInfo.columns;
+            console.log("COLNAMES", colNames);
+            var inputData = {};
+            var fieldNames = [];
+            _.each(_.pluck(cols, 'columnName'), function(colName) {
+                var fieldName = _str.camelize(colName),
+                    accessor = fieldName;
+                if (fieldName.slice(-2) === 'Id') {
+                    accessor = fieldName.slice(0, -2);
+                    fieldName = accessor + '.id';
+                }
+                if (data[accessor]) {
+                    inputData[accessor] = data[accessor];
+                    fieldNames.push(fieldName);
+                }
+            });
+            console.log("inputdata1", inputData);
+            var colNames = [];
+            var colVals = [];
+            inputData[BAG_COL] = _.omit(data, _.keys(inputData));
+            console.log("inputdata2", inputData);
+            var valNum = 1;
+            _.each(cols, function(col) {
+                var colName = col.columnName;
+                if (colName === BAG_COL) {
+                    colNames.push(colName);
+                    colVals.push('$' + valNum);
+                    valNum++;
+                    return;
+                }
+                if (_str.startsWith(colName, SYS_COL_PREFIX)
+                    && colName !== BAG_COL) {
+                    return;
+                }
+                colNames.push(colName);
+                var fieldName = _str.camelize(colName);
+                if (fieldName.slice(-2) === 'Id') {
+                    fieldName = fieldName.slice(0, -2);
+                }
+                var val = inputData[fieldName];
+                if (val) {
+                    colVals.push('$' + valNum);
+                    valNum++;
+                } else {
+                    colVals.push(col.columnDefault ? 'DEFAULT' : 'NULL');
+                }
+            });
+
+            var bindVars = _.transform(
+                fieldNames.concat([BAG_COL]),
+                function(result, val, idx) {
+                    result[idx+1] = val;
+                    return result;
+                }, {});
+
+            return {
+                inputData: inputData,
+                templateVars: {
+                    tableName: _str.underscored(typeName),
+                    bindVars: bindVars,
+                    colNamesStr: colNames.join(', '),
+                    colValsStr: colVals.join(', ')
+                }
+            };
+
+        });
+    }
+
+    ss.addNamespace = function(namespace) {
+        var schema = _str.underscored(namespace);
+        onNamespaces = onNamespaces.then(function(namespaces) {
+            return ss.query('SELECT * FROM information_schema.schemata WHERE schema_name=$1;', schema)
+            .then(function(results) {
+                return results.length
+                    ? Promise.resolve()
+                    : ss.query('CREATE SCHEMA ' + schema);
+            })
+            .then(function() {
+                namespaces[namespace] = namespace;
+                return namespaces;
+            });
+        });
     };
 
-    ss.defineEntity = function(name, opts) {
-        return ss.execTemplate('__create_entity', {
-            tableName: _str.underscored(name)
+    ss.addType = function(name, spec) {
+        var nameParts = name.split('.');
+        var type = (nameParts.length > 1) ? nameParts[1] : nameParts[0],
+            namespace = (nameParts.length > 1) ? nameParts[0] : null,
+            schema = _str.underscored(namespace),
+            table = _str.underscored(type);
+
+        spec = _.defaults(spec || {}, {
+            fields: {},
+            refs: {}
+        });
+        return requireNamespace(namespace)
+        .then(function() {
+            return ss.execTemplate('__create_entity', {
+                tableName: schema + '.' + table,
+                columnDefinitions: fieldsToDDL(spec.fields),
+                refDefinitions: fieldsToDDL(spec.refs, true)
+            });
+        })
+        .then(function() {
+            return ss.exec('__get_table_info', {
+                schemaName: schema,
+                tableName: table
+            });
+        })
+        .then(function(info) {
+            onTypeInfo = onTypeInfo.then(function(typeInfo) {
+                typeInfo[name] = {columns: info};
+                return typeInfo;
+            });
         });
     };
 
     ss.upsert = function(name, data) {
         return (
-          data.id
-            ? ss.exectTemplate('__update', {
-                tableName: _str.underscored(name)
-              }, data)
-            : ss.execTemplate('__insert', {
-                tableName: _str.underscored(name)
-              }, data)
-        );
+            data.id
+                ? getInsertContext(name, data)
+                    .then(function(ctx) {
+                        console.log("CTX", ctx);
+                        return ss.execTemplate(
+                            '__update',
+                            ctx.templateVars,
+                            ctx.inputData
+                        );
+                    })
+                : getInsertContext(name, data)
+                    .then(function(ctx) {
+                        console.log("CTX", ctx);
+                        return ss.execTemplate(
+                            '__insert',
+                            ctx.templateVars,
+                            ctx.inputData
+                        );
+                    })
+        ).then(_.first);
     };
 
     ss.getById = function(name, id) {
@@ -223,6 +387,7 @@ exports.connect = function(options) {
                         throw error("template not found: " + templateKey);
                     }
                     var text = template(templateParams);
+                    console.log("TEMPLATE: ", templateParams, text);
                     prepare(key, null, text);
                     return ctx.exec(key, values);
                 };
