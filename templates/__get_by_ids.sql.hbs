@@ -3,4 +3,5 @@
 --
 SELECT *
   FROM {{tableName}}
- WHERE id = ANY($1::bigint[]);
+ WHERE id = ANY($1::bigint[])
+   AND __deleted IS NULL;

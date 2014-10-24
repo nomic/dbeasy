@@ -7,7 +7,8 @@ var pg = require('pg').native
 , Promise = require('bluebird')
 , fs = Promise.promisifyAll(require('fs'))
 , handlebars = require('handlebars')
-, path = require('path');
+, path = require('path')
+, SYS_COL_PREFIX = '__';
 
 
 function conString(pgconf) {
@@ -39,8 +40,16 @@ function error(msg, detail, cause) {
     return err;
 }
 
+function getKeyPath(obj, keyPath) {
+    var keys = keyPath.split('.');
+    _.each(keys, function(key) {
+        obj = _.isObject(obj) ? obj[key] : void(0);
+    });
+    return obj;
+}
+
 function parseNamedParams(text) {
-    var paramsRegex = /\$([0-9]+):\ *([a-zA-Z_\$]+)/mg,
+    var paramsRegex = /\$([0-9]+):\ *([a-zA-Z_\.\$]+)/mg,
         matches,
         params = [];
     while (matches = paramsRegex.exec(text)) {
@@ -64,19 +73,33 @@ exports.encodeArray = function(arr, conformer) {
     return '{' + _.map(arr, conformer).join(',') + '}';
 };
 
-exports.camelizeColumnNames = function(row) {
-    var r = {};
-    _.each(row, function(v, k) {
-        var end = k.slice(-3);
-        if (end === "_id")
-            r[_str.camelize(k.slice(0,-3))] = {id: v};
+exports.jsifyColumnNames = jsifyColumnNames;
+function jsifyColumnNames(row) {
+    return _.transform(row, function(result, val, key) {
+        if (key.slice(-3) === '_id')
+            result[_str.camelize(key.slice(0,-3))] = {id: val};
         else
-            r[_str.camelize(k)] = v;
-    });
-    return r;
-};
+            result[_str.camelize(key)] = val;
+        return result;
+    }, {});
+}
+
+exports.removeSysColumns = removeSysColumns;
+function removeSysColumns(row) {
+    return _.transform(row, function(result, val, key) {
+        if (key.slice(0, 2) !== SYS_COL_PREFIX) {
+            result[key] = val;
+        }
+        return result;
+    }, {});
+}
 
 exports.simpleStore = function(options) {
+    options = _.defaults(options, {
+        egress: _.compose(
+            jsifyColumnNames,
+            removeSysColumns)
+    });
     var ss = exports.connect(options);
 
     ss.prepareDir(path.join(__dirname, 'templates'));
@@ -96,16 +119,28 @@ exports.simpleStore = function(options) {
           data.id
             ? ss.exectTemplate('__update', {
                 tableName: _str.underscored(name)
-              })
+              }, data)
             : ss.execTemplate('__insert', {
                 tableName: _str.underscored(name)
-              })
+              }, data)
         );
     };
 
     ss.getById = function(name, id) {
         return ss.getByIds(name, [id])
-        .then(_.first);
+        .then(function(results) {
+            return results[0] || null;
+        });
+    };
+
+    ss.deleteById = function(name, id) {
+        return ss.deleteByIds(name, [id]);
+    };
+
+    ss.deleteByIds = function(name, ids) {
+        return ss.execTemplate('__delete_by_ids', {
+            tableName: _str.underscored(name)
+        }, ids);
     };
 
     ss.getByIds = function(name, ids) {
@@ -156,8 +191,8 @@ exports.connect = function(options) {
                 ctx.query = function(text, vals) {
                     if (vals !== undefined) { vals = _.rest(arguments); }
                     return ctx.queryRaw(text, vals)
-                    .then(function(result) {
-                        return result.rows ? egress(result.rows) : null;
+                    .then(function(results) {
+                        return results ? egress(results) : null;
                     });
                 };
                 ctx.queryRaw = function(text, vals) {
@@ -169,7 +204,7 @@ exports.connect = function(options) {
 
                         return connQuery(text, vals)
                             .then(function(result) {
-                                results.push(result);
+                                results.push(result.rows ? result.rows : null);
                                 return next(results);
                             })
                             .catch(function(err) {
@@ -204,7 +239,7 @@ exports.connect = function(options) {
                         }
                         var namedValues = values[0];
                         values = _.map(prepared.namedParams, function(paramName) {
-                            return namedValues[paramName];
+                            return getKeyPath(namedValues, paramName);
                         });
                     }
 
@@ -287,6 +322,15 @@ exports.connect = function(options) {
         var args = _.toArray(arguments);
         return db.onConnection( function(conn) {
             return conn.query.apply(sql, args);
+        });
+    };
+
+    // Execute a sql query string and don't run
+    // the results through egress
+    db.queryRaw = function(sql /*, params*/) {
+        var args = _.toArray(arguments);
+        return db.onConnection( function(conn) {
+            return conn.queryRaw.apply(sql, args);
         });
     };
 

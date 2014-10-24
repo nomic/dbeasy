@@ -1,0 +1,6 @@
+--
+-- $1: id
+--
+UPDATE {{tableName}}
+   SET __deleted = current_timestamp
+ WHERE id = ANY($1::bigint[]);
