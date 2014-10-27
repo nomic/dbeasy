@@ -3,10 +3,11 @@
 var Promise = require("bluebird"),
     _ = require("lodash"),
     dbeasy = require("../index.js"),
+    client = require("../client.js"),
     assert = require("assert"),
     createDb = require("./util").createDb;
 
-suite("Core", function() {
+suite("Cliet", function() {
 
     var db;
 
@@ -209,7 +210,7 @@ suite("Core", function() {
             "--"
         );
 
-        var actual = dbeasy.parseNamedParams(text);
+        var actual = client.parseNamedParams(text);
         assert.equal(actual[0], 'foo');
         assert.equal(actual[1], 'bar');
     });

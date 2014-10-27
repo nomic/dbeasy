@@ -12,10 +12,10 @@ _.each(['host', 'database', 'user', 'port', 'password', 'url'], function(key) {
 
 exports.createDb = createDb;
 function createDb(testOpts) {
-    return dbeasy.client( _.extend(_.clone(pgconf), testOpts) );
+    return dbeasy.client( _.extend(_.clone(pgconf), {debug: false}) );
 }
 
 exports.createSimpleStore = createSimpleStore;
 function createSimpleStore(testOpts) {
-    return dbeasy.store( _.extend(_.clone(pgconf), testOpts) );
+    return dbeasy.store( _.extend(_.clone(pgconf), {debug: false}) );
 }

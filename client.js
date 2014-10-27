@@ -86,10 +86,13 @@ function jsifyColumns(row) {
 
 exports.connect = connect;
 function connect(options) {
+    var isDebug = !!options.debug;
     var logger = options.logger || {
-        debug: function(){},
-        info: function(){},
-        error: function(){},
+        debug: function() {
+            if (isDebug) console.log.apply(console, arguments);
+        },
+        info: console.log,
+        error: console.error,
     };
     options = options || {};
     var db = {};
@@ -122,7 +125,6 @@ function connect(options) {
                     return connQuery('END');
                 };
                 ctx.query = function(text, vals) {
-                    if (vals !== undefined) { vals = _.rest(arguments); }
                     return ctx.queryRaw(text, vals)
                     .then(function(results) {
                         return results ? egress(results) : null;
@@ -193,6 +195,12 @@ function connect(options) {
                             values: values,
                             types: prepared.types
                         };
+                        logger.debug(">>>> DBEasy execute ",
+                            '\n',
+                            _.omit(opts, 'text'),
+                            '\n',
+                            opts.text,
+                            '\n<<<<');
                         return connQuery(opts).then(function(result) {
                             results.push(result.rows ? egress(result.rows) : null);
                             return next(results);
@@ -214,6 +222,10 @@ function connect(options) {
                                     throw err;
                                 }
                             }
+                            logger.debug(">xx> DBEasy error ",
+                                '\n',
+                                err.stack,
+                                '\n<xx<');
                             throw error('exec failed', {key: key, values: values}, err);
                         });
                     })([]);

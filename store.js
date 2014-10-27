@@ -31,22 +31,26 @@ function connect(options) {
 
     var ss = client.connect(options);
     ss.prepareDir(path.join(__dirname, 'sql'));
-    var onTableInfo = Promise.resolve({});
-    var onNamespaces = Promise.resolve({});
 
-   function loadSpecs() {
+    var onSpecTableExists = function() {
         return ss.query([
             'SELECT 1 FROM information_schema.tables',
             ' WHERE table_name=\'spec\'',
-            '   AND table_schema=\'simple_store\';'].join('\n'))
-        .then(function(rows) {
-            return (rows.length
-                ? ss.query('SELECT * FROM simple_store.spec;')
-                : ss.exec('__create_spec_table')
-                    .then(function() {
-                        return [];
-                    })
-            );
+            '   AND table_schema=\'dbeasy_store\';'].join('\n'))
+        .then(function(results) {
+            if (! results.length) return ss.exec('__create_spec_table');
+        });
+    };
+
+   function getSpec(specName) {
+        return onSpecTableExists()
+        .then(function() {
+            return ss.query(
+                'SELECT spec FROM dbeasy_store.spec WHERE name = $1',
+                specName);
+        })
+        .then(function(specRows) {
+            return specRows[0] ? specRows[0].spec : null;
         });
     }
 
@@ -62,26 +66,18 @@ function connect(options) {
     }
 
     function ensureNamespace(namespace) {
-        return onNamespaces.then(function(namespaces) {
-            if (!namespaces[namespace]) {
-                return ss.addNamespace(namespace);
-            }
-        });
+        return ss.addNamespace(namespace);
     }
 
-    function tableInfo(specName) {
-        return onTableInfo
-        .then(function(tableInfo) {
-            if (!tableInfo[specName]) throw new Error('Unkown spec: ' + specName);
-            return tableInfo[specName];
-        });
-    }
-
-    function getSavedSpec(fullName) {
-        return loadSpecs()
-        .then(function(specRows) {
-            var specRow = _.find(specRows, {name: fullName});
-            return specRow ? specRow.spec : null;
+    function getColumnInfo(tableName) {
+        var parts = tableName.split('.');
+        return ss.exec('__get_table_info', {
+            schemaName: parts[0],
+            tableName: parts[1]
+        })
+        .then(function(cols) {
+            if (!cols[0]) throw new Error('Unkown store table: ' + tableName);
+            return cols;
         });
     }
 
@@ -89,22 +85,10 @@ function connect(options) {
         return ss.exec('__save_spec', {name: fullName, spec: spec});
     }
 
-    function clearTableInfo(specName) {
-        var tableName = _str.Camelize(specName);
-        return onTableInfo.then(function(tableInfo) {
-            delete tableInfo[tableName];
-        });
-    }
-
-    function deleteSpec(specName) {
-        return ss.query(
-            'DELETE FROM simple_store.spec WHERE name = ' + specName);
-    }
-
     function getInsertContext(specName, data) {
-        return tableInfo(specName)
-        .then(function(atableInfo) {
-            var cols = atableInfo.columns;
+        var tableName = _str.underscored(specName);
+        return getColumnInfo(tableName)
+        .then(function(cols) {
             var inputData = {};
             var fieldNames = [];
             _.each(_.pluck(cols, 'columnName'), function(colName) {
@@ -159,7 +143,7 @@ function connect(options) {
             return {
                 inputData: inputData,
                 templateVars: {
-                    tableName: _str.underscored(specName),
+                    tableName: _str.underscored(tableName),
                     bindVars: bindVars,
                     colNamesStr: colNames.join(', '),
                     colValsStr: colVals.join(', ')
@@ -171,19 +155,32 @@ function connect(options) {
 
     ss.addNamespace = function(namespace) {
         var schema = _str.underscored(namespace);
-        onNamespaces = onNamespaces.then(function(namespaces) {
-            return ss.query('SELECT * FROM information_schema.schemata WHERE schema_name=$1;', schema)
-            .then(function(results) {
-                return results.length
-                    ? Promise.resolve()
-                    : ss.query('CREATE SCHEMA ' + schema);
-            })
-            .then(function() {
-                namespaces[namespace] = namespace;
-                return namespaces;
-            });
+        return ss.query('SELECT * FROM information_schema.schemata WHERE schema_name = $1;', schema)
+        .then(function(results) {
+            return results.length
+                ? Promise.resolve()
+                : ss.query('CREATE SCHEMA ' + schema);
         });
-        return onNamespaces;
+    };
+
+    ss.dropNamespace = function(namespace) {
+        return onSpecTableExists()
+        .then(function() {
+            return Promise.all([
+                // Drop the remembered specs
+                ss.query([
+                    'DELETE FROM dbeasy_store.spec',
+                    'WHERE name LIKE \'' + namespace + '.%\';'
+                ].join('\n')),
+
+                // Erase the data
+                ss.query([
+                    'DROP SCHEMA ',
+                    _str.underscored(namespace) + ' CASCADE;'
+                ].join('\n'))
+                .catch(_.noop)
+            ]);
+        });
     };
 
     ss.addSpec = function(fullName, spec) {
@@ -204,7 +201,7 @@ function connect(options) {
             table = _str.underscored(name);
 
         return Promise.all([
-            getSavedSpec(fullName),
+            getSpec(fullName),
             ensureNamespace(namespace)
         ])
         .spread(function(savedSpec) {
@@ -218,19 +215,6 @@ function connect(options) {
                     return saveSpec(fullName, spec);
                 });
             }
-        })
-        .then(function() {
-            return ss.exec('__get_table_info', {
-                schemaName: schema,
-                tableName: table
-            });
-        })
-        .then(function(info) {
-            onTableInfo = onTableInfo.then(function(tableInfo) {
-                tableInfo[fullName] = {columns: info};
-                return tableInfo;
-            });
-            return onTableInfo;
         });
     };
 
@@ -277,62 +261,6 @@ function connect(options) {
         return ss.execTemplate('__get_by_ids', {
             tableName: _str.underscored(name)
         }, ids);
-    };
-
-    ss.dropNamespace = function(namespace) {
-        return onNamespaces.then(function(namespaces) {
-            delete namespaces[namespace];
-        })
-        .then(function() {
-            return onTableInfo.then(function(tableInfo) {
-                return Promise.map(
-                    _.filter(
-                        _.map(_.keys(tableInfo), _str.camelize),
-                        function(specName) {
-                            _str.startsWith(specName, namespace);
-                        }),
-                    function(specName) {
-                        return _.map(specName, clearTableInfo)
-                            .concat(_.map(specName, deleteSpec));
-                    });
-            });
-        })
-        .then(function() {
-            ss.query(
-                'DROP SCHEMA '
-                + _str.underscored(namespace) + ' CASCADE;')
-            .catch(_.noop);
-        });
-    };
-
-    ss.dropNamespace = function(namespace) {
-        return onNamespaces.then(function(namespaces) {
-            delete namespaces[namespace];
-        })
-        .then(function() {
-            // Clear cached table info
-            onTableInfo = onTableInfo
-            .then(function(tableInfo) {
-                return _.reject(
-                    _.map(_.keys(tableInfo), _str.camelize),
-                    function(specName) {
-                        _str.startsWith(specName, namespace);
-                    });
-            });
-
-            // Drop the remembered specs
-            return ss.query([
-                'DELETE FROM simple_store.spec',
-                'WHERE name LIKE \'' + namespace + '.%\';'
-            ].join('\n'));
-        })
-        .then(function() {
-            // Erase the data
-            ss.query(
-                'DROP SCHEMA '
-                + _str.underscored(namespace) + ' CASCADE;')
-            .catch(_.noop);
-        });
     };
 
     return ss;
