@@ -1,16 +1,15 @@
 "use strict";
-/*global suite: false, test: false, setup: false*/
+/*global suite: false, test: false*/
 
 //allow chai syntax like expect(foo).to.be.empty
 /*jshint expr: true*/
 
 var Promise = require("bluebird"),
     _ = require("lodash"),
-    dbeasy = require("../index.js"),
     expect = require("chai").expect,
     ss = require("./util").createSimpleStore;
 
-suite("Simple Store", function() {
+suite("Store", function() {
 
     test("Operations on a default entity", function() {
       var store = ss({poolSize: 2});
