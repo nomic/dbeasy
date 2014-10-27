@@ -86,7 +86,6 @@ function jsifyColumns(row) {
 
 exports.connect = connect;
 function connect(options) {
-    var isDebug = !!options.debug;
     var logger = options.logger || {
         debug: function() {
             if (isDebug) console.log.apply(console, arguments);
@@ -95,6 +94,7 @@ function connect(options) {
         error: console.error,
     };
     options = options || {};
+    var isDebug = !!options.debug;
     var db = {};
     db.__prepared = {};
     db.__templates = {};
