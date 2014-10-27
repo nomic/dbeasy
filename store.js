@@ -251,14 +251,14 @@ function connect(options) {
         return ss.deleteByIds(name, [id]);
     };
 
-    ss.deleteByIds = function(name, ids) {
-        return ss.execTemplate('__delete_by_ids', {
+    ss.getByIds = function(name, ids) {
+        return ss.execTemplate('__get_by_ids', {
             tableName: _str.underscored(name)
         }, ids);
     };
 
-    ss.getByIds = function(name, ids) {
-        return ss.execTemplate('__get_by_ids', {
+    ss.deleteByIds = function(name, ids) {
+        return ss.execTemplate('__delete_by_ids', {
             tableName: _str.underscored(name)
         }, ids);
     };
