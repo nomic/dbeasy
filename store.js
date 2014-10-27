@@ -7,6 +7,8 @@ var path = require('path'),
     SYS_COL_PREFIX = '__',
     BAG_COL = SYS_COL_PREFIX + 'bag';
 
+exports.BAG_COL = BAG_COL;
+
 function removeSysColumns(row) {
     return _.transform(row, function(result, val, key) {
         if (key === '__bag') {
@@ -32,9 +34,9 @@ function connect(options) {
     var onTableInfo = Promise.resolve({});
     var onNamespaces = Promise.resolve({});
 
-    var onSavedSpecs = (function getSavedSpecs() {
+   function loadSpecs() {
         return ss.query([
-            'SELECT * FROM information_schema.tables',
+            'SELECT 1 FROM information_schema.tables',
             ' WHERE table_name=\'spec\'',
             '   AND table_schema=\'simple_store\';'].join('\n'))
         .then(function(rows) {
@@ -46,7 +48,7 @@ function connect(options) {
                     })
             );
         });
-    })();
+    }
 
     function fieldsToDDL(fields, isRefs) {
         return _.transform(fields, function(ddl, spec, name) {
@@ -59,10 +61,10 @@ function connect(options) {
         }, []);
     }
 
-    function requireNamespace(namespace) {
+    function ensureNamespace(namespace) {
         return onNamespaces.then(function(namespaces) {
             if (!namespaces[namespace]) {
-                throw new Error('Namespace not found: ' + namespace);
+                return ss.addNamespace(namespace);
             }
         });
     }
@@ -76,21 +78,34 @@ function connect(options) {
     }
 
     function getSavedSpec(fullName) {
-        return onSavedSpecs
-        .then(function(specs) {
-            return _.where(specs, {name: fullName}) || null;
+        return loadSpecs()
+        .then(function(specRows) {
+            var specRow = _.find(specRows, {name: fullName});
+            return specRow ? specRow.spec : null;
         });
     }
 
     function saveSpec(fullName, spec) {
+        console.log("SAVING", fullName, spec);
         return ss.exec('__save_spec', {name: fullName, spec: spec});
+    }
+
+    function clearTableInfo(specName) {
+        var tableName = _str.Camelize(specName);
+        return onTableInfo.then(function(tableInfo) {
+            delete tableInfo[tableName];
+        });
+    }
+
+    function deleteSpec(specName) {
+        return ss.query(
+            'DELETE FROM simple_store.spec WHERE name = ' + specName);
     }
 
     function getInsertContext(specName, data) {
         return tableInfo(specName)
         .then(function(atableInfo) {
             var cols = atableInfo.columns;
-            console.log("COLNAMES", colNames);
             var inputData = {};
             var fieldNames = [];
             _.each(_.pluck(cols, 'columnName'), function(colName) {
@@ -158,10 +173,12 @@ function connect(options) {
     }
 
     ss.addNamespace = function(namespace) {
+        console.log("ADD NAMESPACE", namespace);
         var schema = _str.underscored(namespace);
         onNamespaces = onNamespaces.then(function(namespaces) {
             return ss.query('SELECT * FROM information_schema.schemata WHERE schema_name=$1;', schema)
             .then(function(results) {
+                console.log("CREATING SCHEMA", schema);
                 return results.length
                     ? Promise.resolve()
                     : ss.query('CREATE SCHEMA ' + schema);
@@ -171,25 +188,33 @@ function connect(options) {
                 return namespaces;
             });
         });
+        return onNamespaces;
     };
 
     ss.addSpec = function(fullName, spec) {
+        spec = _.defaults(spec || {}, {
+            fields: {},
+            refs: {}
+        });
+
+        var unknownKeys = _.keys(_.omit(spec, 'fields', 'refs'));
+        if (unknownKeys.length !== 0) {
+            throw new Error('Malformed spec; unknown keys: ' + unknownKeys);
+        }
+
         var nameParts = fullName.split('.');
         var name = (nameParts.length > 1) ? nameParts[1] : nameParts[0],
             namespace = (nameParts.length > 1) ? nameParts[0] : null,
             schema = _str.underscored(namespace),
             table = _str.underscored(name);
 
-        spec = _.defaults(spec || {}, {
-            fields: {},
-            refs: {}
-        });
         return Promise.all([
             getSavedSpec(fullName),
-            requireNamespace(namespace)
+            ensureNamespace(namespace)
         ])
         .spread(function(savedSpec) {
             if (! _.isEqual(spec, savedSpec)) {
+                console.log("NOT EQUAL", spec, savedSpec);
                 return ss.execTemplate('__create_entity', {
                     tableName: schema + '.' + table,
                     columnDefinitions: fieldsToDDL(spec.fields),
@@ -199,6 +224,7 @@ function connect(options) {
                     return saveSpec(fullName, spec);
                 });
             }
+            console.log("EQUAL", spec, savedSpec);
         })
         .then(function() {
             return ss.exec('__get_table_info', {
@@ -211,6 +237,7 @@ function connect(options) {
                 tableInfo[fullName] = {columns: info};
                 return tableInfo;
             });
+            return onTableInfo;
         });
     };
 
@@ -261,5 +288,62 @@ function connect(options) {
         }, ids);
     };
 
+    ss.dropNamespace = function(namespace) {
+        return onNamespaces.then(function(namespaces) {
+            delete namespaces[namespace];
+        })
+        .then(function() {
+            return onTableInfo.then(function(tableInfo) {
+                return Promise.map(
+                    _.filter(
+                        _.map(_.keys(tableInfo), _str.camelize),
+                        function(specName) {
+                            _str.startsWith(specName, namespace);
+                        }),
+                    function(specName) {
+                        return _.map(specName, clearTableInfo)
+                            .concat(_.map(specName, deleteSpec));
+                    });
+            });
+        })
+        .then(function() {
+            ss.query(
+                'DROP SCHEMA '
+                + _str.underscored(namespace) + ' CASCADE;')
+            .catch(_.noop);
+        });
+    };
+
+    ss.dropNamespace = function(namespace) {
+        return onNamespaces.then(function(namespaces) {
+            delete namespaces[namespace];
+        })
+        .then(function() {
+            // Clear cached table info
+            onTableInfo = onTableInfo
+            .then(function(tableInfo) {
+                return _.reject(
+                    _.map(_.keys(tableInfo), _str.camelize),
+                    function(specName) {
+                        _str.startsWith(specName, namespace);
+                    });
+            });
+
+            // Drop the remembered specs
+            return ss.query([
+                'DELETE FROM simple_store.spec',
+                'WHERE name LIKE \'' + namespace + '.%\';'
+            ].join('\n'));
+        })
+        .then(function() {
+            // Erase the data
+            ss.query(
+                'DROP SCHEMA '
+                + _str.underscored(namespace) + ' CASCADE;')
+            .catch(_.noop);
+        });
+    };
+
     return ss;
-};
+}
+
