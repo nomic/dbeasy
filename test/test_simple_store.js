@@ -101,7 +101,6 @@ suite('Store', function() {
       });
     })
     .then(function(result) {
-      console.log(result);
       expect(result).to.have.property('id', '1');
       expect(result).to.have.property('firstName', 'Melly');
       expect(result).to.have.property('interests');

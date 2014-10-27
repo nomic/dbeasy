@@ -86,7 +86,6 @@ function connect(options) {
     }
 
     function saveSpec(fullName, spec) {
-        console.log("SAVING", fullName, spec);
         return ss.exec('__save_spec', {name: fullName, spec: spec});
     }
 
@@ -120,11 +119,9 @@ function connect(options) {
                     fieldNames.push(fieldName);
                 }
             });
-            console.log("inputdata1", inputData);
             var colNames = [];
             var colVals = [];
             inputData[BAG_COL] = _.omit(data, _.keys(inputData));
-            console.log("inputdata2", inputData);
             var valNum = 1;
             _.each(cols, function(col) {
                 var colName = col.columnName;
@@ -173,12 +170,10 @@ function connect(options) {
     }
 
     ss.addNamespace = function(namespace) {
-        console.log("ADD NAMESPACE", namespace);
         var schema = _str.underscored(namespace);
         onNamespaces = onNamespaces.then(function(namespaces) {
             return ss.query('SELECT * FROM information_schema.schemata WHERE schema_name=$1;', schema)
             .then(function(results) {
-                console.log("CREATING SCHEMA", schema);
                 return results.length
                     ? Promise.resolve()
                     : ss.query('CREATE SCHEMA ' + schema);
@@ -214,7 +209,6 @@ function connect(options) {
         ])
         .spread(function(savedSpec) {
             if (! _.isEqual(spec, savedSpec)) {
-                console.log("NOT EQUAL", spec, savedSpec);
                 return ss.execTemplate('__create_entity', {
                     tableName: schema + '.' + table,
                     columnDefinitions: fieldsToDDL(spec.fields),
@@ -224,7 +218,6 @@ function connect(options) {
                     return saveSpec(fullName, spec);
                 });
             }
-            console.log("EQUAL", spec, savedSpec);
         })
         .then(function() {
             return ss.exec('__get_table_info', {
@@ -246,7 +239,6 @@ function connect(options) {
             data.id
                 ? getInsertContext(name, data)
                     .then(function(ctx) {
-                        console.log("CTX", ctx);
                         return ss.execTemplate(
                             '__update',
                             ctx.templateVars,
@@ -255,7 +247,6 @@ function connect(options) {
                     })
                 : getInsertContext(name, data)
                     .then(function(ctx) {
-                        console.log("CTX", ctx);
                         return ss.execTemplate(
                             '__insert',
                             ctx.templateVars,

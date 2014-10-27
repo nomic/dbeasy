@@ -162,7 +162,6 @@ function connect(options) {
                         throw error("template not found: " + templateKey);
                     }
                     var text = template(templateParams);
-                    console.log("TEMPLATE: ", templateParams, text);
                     prepare(key, null, text);
                     return ctx.exec(key, values);
                 };
@@ -215,7 +214,6 @@ function connect(options) {
                                     throw err;
                                 }
                             }
-                            console.log(err, {key: key, values: values});
                             throw error('exec failed', {key: key, values: values}, err);
                         });
                     })([]);
@@ -367,7 +365,6 @@ function connect(options) {
         .then(function() {
             return key;
         }, function(err) {
-            console.log(err);
             throw error("Failed to prepare", {key: key}, err);
         });
         return reading;
