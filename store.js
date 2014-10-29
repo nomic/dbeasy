@@ -21,6 +21,29 @@ function removeSysColumns(row) {
     }, {});
 }
 
+exports.factory = factory;
+function factory(options) {
+
+    return function() {
+        var singleSchema = false;
+        var schemas = {};
+        if (_.isString(arguments[0])) {
+            singleSchema = true;
+            schemas[arguments[0]] = arguments[1];
+        } else {
+            schemas = arguments[0];
+        }
+        var store = connect(options);
+        _.each(schemas, function(schema, name) {
+            store.addSpec(name, schema);
+        });
+        return singleSchema
+            ? store(arguments[0])
+            : store;
+    };
+
+}
+
 exports.connect = connect;
 function connect(options) {
     options = _.defaults(options, {
@@ -29,26 +52,41 @@ function connect(options) {
             removeSysColumns)
     });
 
-    var ss = client.connect(options);
-    ss.prepareDir(path.join(__dirname, 'sql'));
+    var db = client.connect(options);
+    db.prepareDir(path.join(__dirname, 'sql'));
 
-    var onSpecTableExists = function() {
-        return ss.query([
+    // Expose db client functions, but only run them after
+    // specs have been processed
+    function addDbFns(store) {
+    _.extend(
+        store,
+        _.mapValues(
+            db,
+            function(val) {
+                if (!_.isFunction(val)) return val;
+                return function() {
+                    var args = arguments;
+                    return onSpecs.then(function() {
+                        return val.apply(db, args);
+                    });
+                };
+            }));
+    }
+
+    function ensureSpecTableExists() {
+        return db.query([
             'SELECT 1 FROM information_schema.tables',
             ' WHERE table_name=\'spec\'',
             '   AND table_schema=\'dbeasy_store\';'].join('\n'))
         .then(function(results) {
-            if (! results.length) return ss.exec('__create_spec_table');
+            if (! results.length) return db.exec('__create_spec_table');
         });
-    };
+    }
 
    function getSpec(specName) {
-        return onSpecTableExists()
-        .then(function() {
-            return ss.query(
-                'SELECT spec FROM dbeasy_store.spec WHERE name = $1',
-                specName);
-        })
+        return db.query(
+            'SELECT spec FROM dbeasy_store.spec WHERE name = $1',
+            specName)
         .then(function(specRows) {
             return specRows[0] ? specRows[0].spec : null;
         });
@@ -66,12 +104,12 @@ function connect(options) {
     }
 
     function ensureNamespace(namespace) {
-        return ss.addNamespace(namespace);
+        return addNamespace(namespace);
     }
 
     function getColumnInfo(tableName) {
         var parts = tableName.split('.');
-        return ss.exec('__get_table_info', {
+        return db.exec('__get_table_info', {
             schemaName: parts[0],
             tableName: parts[1]
         })
@@ -82,7 +120,7 @@ function connect(options) {
     }
 
     function saveSpec(fullName, spec) {
-        return ss.exec('__save_spec', {name: fullName, spec: spec});
+        return db.exec('__save_spec', {name: fullName, spec: spec});
     }
 
     function getInsertContext(specName, data) {
@@ -153,18 +191,32 @@ function connect(options) {
         });
     }
 
-    ss.addNamespace = function(namespace) {
+    function addNamespace(namespace) {
         var schema = _str.underscored(namespace);
-        return ss.query('SELECT * FROM information_schema.schemata WHERE schema_name = $1;', schema)
+        return db.query('SELECT * FROM information_schema.schemata WHERE schema_name = $1;', schema)
         .then(function(results) {
             return results.length
                 ? Promise.resolve()
-                : ss.query('CREATE SCHEMA ' + schema);
+                : db.query('CREATE SCHEMA ' + schema);
         });
+    }
+    var ss = function(schema) {
+        var store = _.mapValues(
+            _.pick(
+                ss,
+                'getByIds', 'getById', 'deleteById', 'deleteByIds',
+                'insert', 'update', 'upsert'),
+            function(fn) { return _.partial(fn, schema); });
+        addDbFns(store);
+        return store;
     };
 
+    var onSpecs = ensureSpecTableExists(db);
+
+    addDbFns(ss, db);
+
     ss.dropNamespace = function(namespace) {
-        return onSpecTableExists()
+        return onSpecs
         .then(function() {
             return Promise.all([
                 // Drop the remembered specs
@@ -174,11 +226,13 @@ function connect(options) {
                 ].join('\n')),
 
                 // Erase the data
-                ss.query([
-                    'DROP SCHEMA ',
-                    _str.underscored(namespace) + ' CASCADE;'
-                ].join('\n'))
-                .catch(_.noop)
+                ensureNamespace(namespace)
+                .then(function() {
+                    return ss.query([
+                        'DROP SCHEMA ',
+                        _str.underscored(namespace) + ' CASCADE;'
+                    ].join('\n'));
+                })
             ]);
         });
     };
@@ -200,13 +254,16 @@ function connect(options) {
             schema = _str.underscored(namespace),
             table = _str.underscored(name);
 
-        return Promise.all([
-            getSpec(fullName),
-            ensureNamespace(namespace)
-        ])
+        onSpecs = onSpecs
+        .then(function() {
+            return Promise.all([
+                getSpec(fullName),
+                ensureNamespace(namespace)
+            ]);
+        })
         .spread(function(savedSpec) {
             if (! _.isEqual(spec, savedSpec)) {
-                return ss.execTemplate('__create_entity', {
+                return db.execTemplate('__create_entity', {
                     tableName: schema + '.' + table,
                     columnDefinitions: fieldsToDDL(spec.fields),
                     refDefinitions: fieldsToDDL(spec.refs, true)
@@ -221,46 +278,72 @@ function connect(options) {
     ss.upsert = function(name, data) {
         return (
             data.id
-                ? getInsertContext(name, data)
-                    .then(function(ctx) {
-                        return ss.execTemplate(
-                            '__update',
-                            ctx.templateVars,
-                            ctx.inputData
-                        );
-                    })
-                : getInsertContext(name, data)
-                    .then(function(ctx) {
-                        return ss.execTemplate(
-                            '__insert',
-                            ctx.templateVars,
-                            ctx.inputData
-                        );
-                    })
+                ? ss.update(name, data)
+                : ss.insert(name, data)
         ).then(_.first);
     };
 
+    ss.insert = function(name, data) {
+        return onSpecs
+        .then(function() {
+            return getInsertContext(name, data)
+            .then(function(ctx) {
+                return ss.execTemplate(
+                    '__insert',
+                    ctx.templateVars,
+                    ctx.inputData
+                );
+            });
+        });
+    };
+
+    ss.update = function(name, data) {
+        return onSpecs
+        .then(function() {
+            return getInsertContext(name, data)
+            .then(function(ctx) {
+                return ss.execTemplate(
+                    '__update',
+                    ctx.templateVars,
+                    ctx.inputData
+                );
+            });
+        });
+    };
+
     ss.getById = function(name, id) {
-        return ss.getByIds(name, [id])
-        .then(function(results) {
-            return results[0] || null;
+        return onSpecs
+        .then(function() {
+            return ss.getByIds(name, [id])
+            .then(function(results) {
+                return results[0] || null;
+            });
         });
     };
 
     ss.deleteById = function(name, id) {
-        return ss.deleteByIds(name, [id]);
+        return onSpecs
+        .then(function() {
+            return ss.deleteByIds(name, [id]);
+        });
     };
 
     ss.getByIds = function(name, ids) {
-        return ss.execTemplate('__get_by_ids', {
-            tableName: _str.underscored(name)
-        }, ids);
+        return onSpecs
+        .then(function() {
+            return ss.execTemplate('__get_by_ids', {
+                tableName: _str.underscored(name)
+            }, ids);
+        });
     };
 
     ss.deleteByIds = function(name, ids) {
-        return ss.execTemplate('__delete_by_ids', {
-            tableName: _str.underscored(name)
-        }, ids);
+        return onSpecs
+        .then(function() {
+            return ss.execTemplate('__delete_by_ids', {
+                tableName: _str.underscored(name)
+            }, ids);
+        });
     };
 
     return ss;

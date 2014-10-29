@@ -8,8 +8,7 @@ var Promise = require('bluebird'),
     _ = require('lodash'),
     expect = require('chai').expect,
     assert = require('assert'),
-    BAG_COL = require('../store').BAG_COL,
-    ss = require('./util').createSimpleStore;
+    util = require('./util');
 
 suite('Store', function() {
 
@@ -17,7 +16,7 @@ suite('Store', function() {
 
 
   setup(function() {
-    store = ss({poolSize: 1});
+    store = util.createStore({poolSize: 3});
     return store.dropNamespace('biz')
     .catch(_.noop);
   });
@@ -25,12 +24,7 @@ suite('Store', function() {
   test('Operations on a default entity', function() {
     return store.dropNamespace('foo')
     .then(function() {
-      return store.addNamespace('foo');
-    })
-    .then(function() {
-      return store.addSpec('foo.fooBar');
-    })
-    .then(function() {
+      store.addSpec('foo.fooBar');
       return store.query('SELECT * FROM foo.foo_bar;')
         .then(function(results) {
           expect(results).to.be.empty;
@@ -73,19 +67,17 @@ suite('Store', function() {
   });
 
   test('Custom fields and data bag', function() {
-    return store.addSpec('biz.emp', {
+    store.addSpec('biz.emp', {
       fields: {
         firstName: 'text NOT NULL'
       },
       refs: {
         dept: 'bigint'
       }
-    })
-    .then(function() {
-      return store.upsert('biz.emp', {
-        creator: {id: '3'},
-        firstName: 'Mel',
-      });
+    });
+    return store.upsert('biz.emp', {
+      creator: {id: '3'},
+      firstName: 'Mel',
     })
     .then(function(result) {
       expect(result).to.have.property('id', '1');
@@ -111,28 +103,24 @@ suite('Store', function() {
   });
 
   test('Update a spec', function() {
-    return store.addSpec('biz.emp', {
+    store.addSpec('biz.emp', {
       fields: {
         firstName: 'text NOT NULL'
       },
-    })
-    .then(function() {
-      return store.addSpec('biz.emp', {
-        fields: {
-          firstName: 'text'
-        },
-        refs: {
-          dept: 'bigint'
-        }
-      });
-    })
-    .then(function() {
-      return store.upsert('biz.emp', {
-        creator: {id: '3'},
-        dept: {id: '2'}
-      }).then(function(emp) {
-        return store.getById('biz.emp', emp.id);
-      });
+    });
+    store.addSpec('biz.emp', {
+      fields: {
+        firstName: 'text'
+      },
+      refs: {
+        dept: 'bigint'
+      }
+    });
+    return store.upsert('biz.emp', {
+      creator: {id: '3'},
+      dept: {id: '2'}
+    }).then(function(emp) {
+      return store.getById('biz.emp', emp.id);
     })
     .then(function(result) {
       expect(result).to.not.have.property('firstName');
@@ -158,22 +146,20 @@ suite('Store', function() {
   });
 
   test('Data not lost when spec is equivalent', function() {
-    return store.addSpec('biz.emp', {
+    store.addSpec('biz.emp', {
       fields: {
         firstName: 'text'
       },
       refs: {
         dept: 'bigint'
       }
+    });
+    return store.upsert('biz.emp', {
+      creator: {id: 1},
+      firstName: 'Joe'
     })
     .then(function() {
-      return store.upsert('biz.emp', {
-        creator: {id: 1},
-        firstName: 'Joe'
-      });
-    })
-    .then(function() {
-      return store.addSpec('biz.emp', {
+      store.addSpec('biz.emp', {
         refs: {
           dept: 'bigint'
         },
@@ -181,8 +167,6 @@ suite('Store', function() {
           firstName: 'text'
         },
       });
-    })
-    .then(function() {
       return store.query('SELECT * FROM biz.emp;');
     })
     .then(function(result) {
@@ -191,4 +175,22 @@ suite('Store', function() {
 
   });
 
+  test('Create store via factory', function() {
+    var storeFactory = util.createStoreFactory({poolSize: 3});
+    var store = storeFactory('biz.emp', {
+      fields: {
+        firstName: 'text NOT NULL'
+      }
+    });
+    return store.upsert({
+      creator: {id: '3'},
+      firstName: 'Mel',
+    })
+    .then(function(result) {
+      expect(result).to.have.property('firstName', 'Mel');
+    });
+
+  });
+
 });
+

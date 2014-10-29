@@ -15,7 +15,12 @@ function createDb(testOpts) {
     return dbeasy.client( _.extend(_.clone(pgconf), testOpts) );
 }
 
-exports.createSimpleStore = createSimpleStore;
-function createSimpleStore(testOpts) {
+exports.createStore = createStore;
+function createStore(testOpts) {
     return dbeasy.store( _.extend(_.clone(pgconf), testOpts) );
+}
+
+exports.createStoreFactory = createStoreFactory;
+function createStoreFactory(testOpts) {
+    return dbeasy.storeFactory( _.extend(_.clone(pgconf), testOpts) );
 }
