@@ -1,0 +1,7 @@
+--{{#each bindVars}}
+-- ${{@key}}: {{this}}{{/each}}
+--
+SELECT *
+  FROM {{tableName}}
+ WHERE {{#each columns}}{{this}} = ${{@key}}
+   AND {{/each}}__deleted IS NULL;

@@ -2,7 +2,6 @@
 /*global suite: false, test: false, setup: false*/
 var Promise = require("bluebird"),
     _ = require("lodash"),
-    dbeasy = require("../index.js"),
     client = require("../client.js"),
     assert = require("assert"),
     createDb = require("./util").createDb;

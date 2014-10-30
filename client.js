@@ -200,12 +200,10 @@ function connect(options) {
                             values: values,
                             types: prepared.types
                         };
-                        logger.debug(">>>> DBEasy execute ",
-                            '\n',
-                            _.omit(opts, 'text'),
-                            '\n',
-                            opts.text,
-                            '\n<<<<');
+                        logger.debug([
+                            ">>>> DBEasy execute ",
+                            JSON.stringify(_.omit(opts, 'text')),
+                            opts.text].join('\n'));
                         return connQuery(opts).then(function(result) {
                             results.push(result.rows ? egress(result.rows) : null);
                             return next(results);
@@ -227,10 +225,10 @@ function connect(options) {
                                     throw err;
                                 }
                             }
-                            logger.debug(">xx> DBEasy error ",
-                                '\n',
-                                err.stack,
-                                '\n<xx<');
+                            logger.error([
+                                ">xx> DBEasy error ",
+                                err,
+                                '<xx<'].join('\n'));
                             throw error('exec failed', {key: key, values: values}, err);
                         });
                     })([]);

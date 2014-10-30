@@ -17,7 +17,7 @@ suite('Store', function() {
 
   setup(function() {
     store = util.createStore({poolSize: 3});
-    return store.dropNamespace('biz')
+    return store.dropNamespace('bigBiz')
     .catch(_.noop);
   });
 
@@ -63,19 +63,28 @@ suite('Store', function() {
       expect(getterResults).to.be.null;
       expect(queryResults).to.have.length(1);
       expect(queryResults[0].__deleted).to.be.a('Date');
+    })
+    .then(function() {
+      return store.insert('foo.fooBar', {creator: {id: '15'}});
+    })
+    .then(function(fooBar) {
+      expect(fooBar).to.have.property('id');
+      fooBar.creator.id = '11';
+      return store.update('foo.fooBar', fooBar);
+    })
+    .then(function(fooBar) {
+      expect(fooBar.creator).to.have.property('id', '11');
     });
   });
 
   test('Custom fields and data bag', function() {
-    store.addSpec('biz.emp', {
+    store.addSpec('bigBiz.emp', {
       fields: {
-        firstName: 'text NOT NULL'
-      },
-      refs: {
-        dept: 'bigint'
+        firstName: 'text NOT NULL',
+        deptId: 'bigint'
       }
     });
-    return store.upsert('biz.emp', {
+    return store.upsert('bigBiz.emp', {
       creator: {id: '3'},
       firstName: 'Mel',
     })
@@ -85,7 +94,7 @@ suite('Store', function() {
       expect(result).to.not.have.property('dept');
     })
     .then(function() {
-      return store.upsert('biz.emp', {
+      return store.upsert('bigBiz.emp', {
         id: '1',
         creator: {id: '3'},
         firstName: 'Melly',
@@ -103,24 +112,22 @@ suite('Store', function() {
   });
 
   test('Update a spec', function() {
-    store.addSpec('biz.emp', {
+    store.addSpec('bigBiz.emp', {
       fields: {
         firstName: 'text NOT NULL'
       },
     });
-    store.addSpec('biz.emp', {
+    store.addSpec('bigBiz.emp', {
       fields: {
-        firstName: 'text'
-      },
-      refs: {
-        dept: 'bigint'
+        firstName: 'text',
+        deptId: 'bigint'
       }
     });
-    return store.upsert('biz.emp', {
+    return store.upsert('bigBiz.emp', {
       creator: {id: '3'},
       dept: {id: '2'}
     }).then(function(emp) {
-      return store.getById('biz.emp', emp.id);
+      return store.getById('bigBiz.emp', emp.id);
     })
     .then(function(result) {
       expect(result).to.not.have.property('firstName');
@@ -130,9 +137,32 @@ suite('Store', function() {
 
   });
 
+  test('Update a spec -- remove field', function() {
+    store.addSpec('bigBiz.emp', {
+      fields: {
+        firstName: 'text NOT NULL'
+      },
+    });
+    store.addSpec('bigBiz.emp', {
+      fields: {
+        firstName: 'text',
+        creatorId: false
+      }
+    });
+    return store.upsert('bigBiz.emp', {
+      dept: {id: '2'}
+    }).then(function(emp) {
+      return store.getById('bigBiz.emp', emp.id);
+    })
+    .then(function(result) {
+      expect(result).to.not.have.property('creator');
+    });
+
+  });
+
   test('Catch invalid spec', function() {
     return Promise.try(function() {
-      return store.addSpec('biz.emp', {
+      return store.addSpec('bigBiz.emp', {
         garbage: {
           icky: 'mess'
         },
@@ -146,28 +176,24 @@ suite('Store', function() {
   });
 
   test('Data not lost when spec is equivalent', function() {
-    store.addSpec('biz.emp', {
+    store.addSpec('bigBiz.emp', {
       fields: {
-        firstName: 'text'
-      },
-      refs: {
-        dept: 'bigint'
+        firstName: 'text',
+        deptId: 'bigint'
       }
     });
-    return store.upsert('biz.emp', {
+    return store.upsert('bigBiz.emp', {
       creator: {id: 1},
       firstName: 'Joe'
     })
     .then(function() {
-      store.addSpec('biz.emp', {
-        refs: {
-          dept: 'bigint'
-        },
+      store.addSpec('bigBiz.emp', {
         fields: {
+          deptId: 'bigint',
           firstName: 'text'
         },
       });
-      return store.query('SELECT * FROM biz.emp;');
+      return store.query('SELECT * FROM big_biz.emp;');
     })
     .then(function(result) {
       expect(result[0]).to.have.property('firstName', 'Joe');
@@ -177,7 +203,7 @@ suite('Store', function() {
 
   test('Create store via factory', function() {
     var storeFactory = util.createStoreFactory({poolSize: 3});
-    var store = storeFactory('biz.emp', {
+    var store = storeFactory('bigBiz.emp', {
       fields: {
         firstName: 'text NOT NULL'
       }
@@ -190,6 +216,49 @@ suite('Store', function() {
       expect(result).to.have.property('firstName', 'Mel');
     });
 
+  });
+
+  test('Use flat references', function() {
+    store.addSpec('bigBiz.emp', {
+      fields: {
+        firstName: 'text NOT NULL',
+        deptId: 'bigint'
+      }
+    });
+    return store.upsert('bigBiz.emp', {
+      creatorId: '3',
+      firstName: 'Mel',
+      deptId: '1',
+    })
+    .then(function(result) {
+      expect(result.creator).to.have.property('id', '3');
+      expect(result.dept).to.have.property('id', '1');
+    });
+  });
+
+  test('Omit default fields', function() {
+    store.addSpec('bigBiz.emp', {
+      fields: {
+        id: false,
+        creatorId: false
+      }
+    });
+    return store.upsert('bigBiz.emp', {})
+    .then(function(result) {
+      expect(result).to.not.have.property('id');
+      expect(result).to.not.have.property('creator');
+    });
+  });
+
+  test('findOne()', function() {
+    store.addSpec('bigBiz.emp', {});
+    return store.upsert('bigBiz.emp', {creatorId: '99'})
+    .then(function() {
+      return store.findOne('bigBiz.emp', {creatorId: '99'});
+    })
+    .then(function(result) {
+      expect(result.creator).have.property('id', '99');
+    });
   });
 
 });

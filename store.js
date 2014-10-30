@@ -26,16 +26,16 @@ function factory(options) {
 
     return function() {
         var singleSchema = false;
-        var schemas = {};
+        var specs = {};
         if (_.isString(arguments[0])) {
             singleSchema = true;
-            schemas[arguments[0]] = arguments[1];
+            specs[arguments[0]] = arguments[1];
         } else {
-            schemas = arguments[0];
+            specs = arguments[0];
         }
         var store = connect(options);
-        _.each(schemas, function(schema, name) {
-            store.addSpec(name, schema);
+        _.each(specs, function(spec, name) {
+            store.addSpec(name, spec);
         });
         return singleSchema
             ? store(arguments[0])
@@ -128,22 +128,30 @@ function connect(options) {
         return getColumnInfo(tableName)
         .then(function(cols) {
             var inputData = {};
+            inputData[BAG_COL] = {};
+            data = _.clone(data);
             var fieldNames = [];
+            // Fields that have a matching column
+            var placed = [];
             _.each(_.pluck(cols, 'columnName'), function(colName) {
                 var fieldName = _str.camelize(colName),
-                    accessor = fieldName;
-                if (fieldName.slice(-2) === 'Id') {
-                    accessor = fieldName.slice(0, -2);
-                    fieldName = accessor + '.id';
+                    val = data[fieldName];
+                placed.push(fieldName);
+                if (!val && fieldName.slice(-2) === 'Id') {
+                    //check for nested id
+                    var objField = fieldName.slice(0,-2);
+                    placed.push(objField);
+                    val = data[objField];
+                    val = val && val.id;
                 }
-                if (data[accessor]) {
-                    inputData[accessor] = data[accessor];
+                if (val) {
+                    inputData[fieldName] = val;
                     fieldNames.push(fieldName);
                 }
             });
             var colNames = [];
             var colVals = [];
-            inputData[BAG_COL] = _.omit(data, _.keys(inputData));
+            inputData[BAG_COL] = _.omit(data, placed);
             var valNum = 1;
             _.each(cols, function(col) {
                 var colName = col.columnName;
@@ -159,9 +167,6 @@ function connect(options) {
                 }
                 colNames.push(colName);
                 var fieldName = _str.camelize(colName);
-                if (fieldName.slice(-2) === 'Id') {
-                    fieldName = fieldName.slice(0, -2);
-                }
                 var val = inputData[fieldName];
                 if (val) {
                     colVals.push('$' + valNum);
@@ -200,13 +205,30 @@ function connect(options) {
                 : db.query('CREATE SCHEMA ' + schema);
         });
     }
-    var ss = function(schema) {
+
+    // A falsey can be passed in for a default field
+    // so that it does not get added, or an alternate
+    // definition will override it.
+    function addDefaultFields(fields, defaults) {
+        var result = _.extend({}, defaults, fields);
+
+        var omit = [];
+        _.each(result, function(def, name) {
+            if (! result[name]) {
+                omit.push(name);
+            }
+        });
+
+        return _.omit(result, omit);
+    }
+
+    var ss = function(specName) {
         var store = _.mapValues(
             _.pick(
                 ss,
                 'getByIds', 'getById', 'deleteById', 'deleteByIds',
-                'insert', 'update', 'upsert'),
-            function(fn) { return _.partial(fn, schema); });
+                'insert', 'update', 'upsert', 'find', 'findOne'),
+            function(fn) { return _.partial(fn, specName); });
         addDbFns(store);
         return store;
     };
@@ -243,6 +265,12 @@ function connect(options) {
             refs: {}
         });
 
+        spec.fields = addDefaultFields(spec.fields, {
+            id: 'bigint NOT NULL',
+            creatorId: 'bigint NOT NULL',
+            created: 'timestamp without time zone DEFAULT now() NOT NULL',
+            updated: 'timestamp without time zone DEFAULT now() NOT NULL',
+        });
         var unknownKeys = _.keys(_.omit(spec, 'fields', 'refs'));
         if (unknownKeys.length !== 0) {
             throw new Error('Malformed spec; unknown keys: ' + unknownKeys);
@@ -266,7 +294,8 @@ function connect(options) {
                 return db.execTemplate('__create_entity', {
                     tableName: schema + '.' + table,
                     columnDefinitions: fieldsToDDL(spec.fields),
-                    refDefinitions: fieldsToDDL(spec.refs, true)
+                    refDefinitions: fieldsToDDL(spec.refs, true),
+                    hasId: !!spec.fields.id
                 })
                 .then(function() {
                     return saveSpec(fullName, spec);
@@ -276,39 +305,40 @@ function connect(options) {
     };
 
     ss.upsert = function(name, data) {
-        return (
-            data.id
-                ? ss.update(name, data)
-                : ss.insert(name, data)
-        ).then(_.first);
+        return (data.id
+            ? ss.update(name, data)
+            : ss.insert(name, data)
+        );
     };
 
     ss.insert = function(name, data) {
         return onSpecs
         .then(function() {
-            return getInsertContext(name, data)
-            .then(function(ctx) {
-                return ss.execTemplate(
-                    '__insert',
-                    ctx.templateVars,
-                    ctx.inputData
-                );
-            });
-        });
+            return getInsertContext(name, data);
+        })
+        .then(function(ctx) {
+            return ss.execTemplate(
+                '__insert',
+                ctx.templateVars,
+                ctx.inputData
+            );
+        })
+        .then(_.first);
     };
 
     ss.update = function(name, data) {
         return onSpecs
         .then(function() {
-            return getInsertContext(name, data)
-            .then(function(ctx) {
-                return ss.execTemplate(
-                    '__update',
-                    ctx.templateVars,
-                    ctx.inputData
-                );
-            });
-        });
+            return getInsertContext(name, data);
+        })
+        .then(function(ctx) {
+            return ss.execTemplate(
+                '__update',
+                ctx.templateVars,
+                ctx.inputData
+            );
+        })
+        .then(_.first);
     };
 
     ss.getById = function(name, id) {
@@ -343,6 +373,31 @@ function connect(options) {
             return ss.execTemplate('__delete_by_ids', {
                 tableName: _str.underscored(name)
             }, ids);
+        });
+    };
+
+    ss.find = function(name, opts) {
+        var idx = 1;
+        var templateVars = {
+            bindVars: {},
+            columns: {},
+            tableName: _str.underscored(name)
+        };
+        templateVars = _.transform(opts, function(result, val, key) {
+            result.bindVars[idx] = key;
+            result.columns[idx] = _str.underscored(key);
+            return result;
+        }, templateVars);
+        return onSpecs
+        .then(function() {
+            return ss.execTemplate('__find', templateVars, opts);
+        });
+    };
+
+    ss.findOne = function(name, opts) {
+        return ss.find(name, opts)
+        .then(function(rows) {
+            return rows[0] || null;
         });
     };
 
