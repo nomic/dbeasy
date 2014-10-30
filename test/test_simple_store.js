@@ -257,7 +257,30 @@ suite('Store', function() {
       return store.findOne('bigBiz.emp', {creatorId: '99'});
     })
     .then(function(result) {
-      expect(result.creator).have.property('id', '99');
+      expect(result.creator).to.have.property('id', '99');
+    });
+  });
+
+  test('Derived field', function() {
+    store.addSpec('bigBiz.emp', {
+      fields: {
+        firstName: 'text',
+        lastName: 'text',
+        creatorId: false
+      },
+      derived: {
+        name: function(record) {
+          return record.firstName + ' ' + record.lastName;
+        }
+      }
+    });
+    return store.insert('bigBiz.emp', {
+      // http://en.wikipedia.org/wiki/Mel_Blanc
+      firstName: 'Mel',
+      lastName: 'Blank'
+    })
+    .then(function(result) {
+      expect(result).to.have.property('name', 'Mel Blank');
     });
   });
 

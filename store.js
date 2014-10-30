@@ -55,6 +55,9 @@ function connect(options) {
     var db = client.connect(options);
     db.prepareDir(path.join(__dirname, 'sql'));
 
+    var onSpecs = ensureSpecTableExists();
+    var derivations = {};
+
     // Expose db client functions, but only run them after
     // specs have been processed
     function addDbFns(store) {
@@ -222,6 +225,26 @@ function connect(options) {
         return _.omit(result, omit);
     }
 
+    function first(rows) {
+        return _.first(rows) || null;
+    }
+
+    function derive(specName) {
+        var derivers = derivations[specName];
+        if (_.isEmpty(derivers)) return _.identity;
+        return function(rows) {
+            if (! rows) return;
+            rows = _.isArray(rows) ? rows : [rows];
+            return _.map(rows, function(row) {
+                row = _.clone(row);
+                _.each(derivers, function(deriverFn, derivedName) {
+                    row[derivedName] = deriverFn(row);
+                });
+                return row;
+            });
+        };
+    }
+
     var ss = function(specName) {
         var store = _.mapValues(
             _.pick(
@@ -232,8 +255,6 @@ function connect(options) {
         addDbFns(store);
         return store;
     };
-
-    var onSpecs = ensureSpecTableExists(db);
 
     addDbFns(ss, db);
 
@@ -262,8 +283,16 @@ function connect(options) {
     ss.addSpec = function(fullName, spec) {
         spec = _.defaults(spec || {}, {
             fields: {},
-            refs: {}
+            refs: {},
+            derived: {}
         });
+
+        var unknownKeys = _.keys(_.omit(spec, 'fields', 'refs', 'derived'));
+        if (unknownKeys.length !== 0) {
+            throw new Error('Malformed spec; unknown keys: ' + unknownKeys);
+        }
+        derivations[fullName] = spec.derived;
+        delete spec.derivations;
 
         spec.fields = addDefaultFields(spec.fields, {
             id: 'bigint NOT NULL',
@@ -271,10 +300,6 @@ function connect(options) {
             created: 'timestamp without time zone DEFAULT now() NOT NULL',
             updated: 'timestamp without time zone DEFAULT now() NOT NULL',
         });
-        var unknownKeys = _.keys(_.omit(spec, 'fields', 'refs'));
-        if (unknownKeys.length !== 0) {
-            throw new Error('Malformed spec; unknown keys: ' + unknownKeys);
-        }
 
         var nameParts = fullName.split('.');
         var name = (nameParts.length > 1) ? nameParts[1] : nameParts[0],
@@ -323,7 +348,7 @@ function connect(options) {
                 ctx.inputData
             );
         })
-        .then(_.first);
+        .then(_.compose(first, derive(name)));
     };
 
     ss.update = function(name, data) {
@@ -338,16 +363,14 @@ function connect(options) {
                 ctx.inputData
             );
         })
-        .then(_.first);
+        .then(_.compose(first, derive(name)));
     };
 
     ss.getById = function(name, id) {
         return onSpecs
         .then(function() {
             return ss.getByIds(name, [id])
-            .then(function(results) {
-                return results[0] || null;
-            });
+            .then(first);
         });
     };
 
@@ -363,7 +386,8 @@ function connect(options) {
         .then(function() {
             return ss.execTemplate('__get_by_ids', {
                 tableName: _str.underscored(name)
-            }, ids);
+            }, ids)
+            .then(derive(name));
         });
     };
 
@@ -390,7 +414,8 @@ function connect(options) {
         }, templateVars);
         return onSpecs
         .then(function() {
-            return ss.execTemplate('__find', templateVars, opts);
+            return ss.execTemplate('__find', templateVars, opts)
+            .then(derive(name));
         });
     };
 
