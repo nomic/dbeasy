@@ -201,9 +201,10 @@ function connect(options) {
                             types: prepared.types
                         };
                         logger.debug([
-                            ">>>> DBEasy execute ",
+                            '>>>> DBEasy execute ',
                             JSON.stringify(_.omit(opts, 'text')),
-                            opts.text].join('\n'));
+                            opts.text,
+                            '<<<<'].join('\n'));
                         return connQuery(opts).then(function(result) {
                             results.push(result.rows ? egress(result.rows) : null);
                             return next(results);
@@ -226,7 +227,7 @@ function connect(options) {
                                 }
                             }
                             logger.error([
-                                ">xx> DBEasy error ",
+                                '>xx> DBEasy error ',
                                 err,
                                 '<xx<'].join('\n'));
                             throw error('exec failed', {key: key, values: values}, err);
