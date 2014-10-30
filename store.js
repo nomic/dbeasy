@@ -292,7 +292,7 @@ function connect(options) {
             throw new Error('Malformed spec; unknown keys: ' + unknownKeys);
         }
         derivations[fullName] = spec.derived;
-        delete spec.derivations;
+        delete spec.derived;
 
         spec.fields = addDefaultFields(spec.fields, {
             id: 'bigint NOT NULL',
