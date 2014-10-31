@@ -76,13 +76,24 @@ function connect(options) {
             }));
     }
 
-    function ensureSpecTableExists() {
+    function specTableExists() {
         return db.query([
             'SELECT 1 FROM information_schema.tables',
             ' WHERE table_name=\'spec\'',
-            '   AND table_schema=\'dbeasy_store\';'].join('\n'))
+            '   AND table_schema=\'dbeasy_store\';'].join('\n'));
+    }
+
+    function ensureSpecTableExists() {
+        return specTableExists()
         .then(function(results) {
-            if (! results.length) return db.exec('__create_spec_table');
+            if (results.length) return;
+            return db.synchronize('specTable', function() {
+                return specTableExists()
+                .then(function(results) {
+                    if (results.length) return;
+                    return db.exec('__create_spec_table');
+                });
+            });
         });
     }
 
@@ -122,8 +133,8 @@ function connect(options) {
         });
     }
 
-    function saveSpec(fullName, spec) {
-        return db.exec('__save_spec', {name: fullName, spec: spec});
+    function saveSpec(specName, spec) {
+        return db.exec('__save_spec', {name: specName, spec: spec});
     }
 
     function getInsertContext(specName, data) {
@@ -245,6 +256,36 @@ function connect(options) {
         };
     }
 
+    function doSpecUpdate(specName, spec) {
+        var nameParts = specName.split('.');
+        var namespace = (nameParts.length > 1) ? nameParts[0] : null,
+            table = _str.underscored(specName);
+        return db.synchronize(specName, function() {
+            return getSpec(specName)
+            .then(function(savedSpec) {
+                // Even if we checked this before entering this
+                // critical section, do it again to avoid wasted work
+                // when several processes are coming up at the same time.
+                if (_.isEqual(spec, savedSpec)) return;
+
+                return ensureNamespace(namespace)
+                .then(function() {
+                    return db.transaction(function(conn) {
+                        return Promise.all([
+                            conn.execTemplate('__create_entity', {
+                                tableName: table,
+                                columnDefinitions: fieldsToDDL(spec.fields),
+                                refDefinitions: fieldsToDDL(spec.refs, true),
+                                hasId: !!spec.fields.id
+                            }),
+                            saveSpec(specName, spec)
+                        ]);
+                    });
+                });
+            });
+        });
+    }
+
     var ss = function(specName) {
         var store = _.mapValues(
             _.pick(
@@ -280,7 +321,7 @@ function connect(options) {
         });
     };
 
-    ss.addSpec = function(fullName, spec) {
+    ss.addSpec = function(specName, spec) {
         spec = _.defaults(spec || {}, {
             fields: {},
             refs: {},
@@ -291,7 +332,7 @@ function connect(options) {
         if (unknownKeys.length !== 0) {
             throw new Error('Malformed spec; unknown keys: ' + unknownKeys);
         }
-        derivations[fullName] = spec.derived;
+        derivations[specName] = spec.derived;
         delete spec.derived;
 
         spec.fields = addDefaultFields(spec.fields, {
@@ -301,30 +342,13 @@ function connect(options) {
             updated: 'timestamp without time zone DEFAULT now() NOT NULL',
         });
 
-        var nameParts = fullName.split('.');
-        var name = (nameParts.length > 1) ? nameParts[1] : nameParts[0],
-            namespace = (nameParts.length > 1) ? nameParts[0] : null,
-            schema = _str.underscored(namespace),
-            table = _str.underscored(name);
-
         onSpecs = onSpecs
         .then(function() {
-            return Promise.all([
-                getSpec(fullName),
-                ensureNamespace(namespace)
-            ]);
+            return getSpec(specName);
         })
-        .spread(function(savedSpec) {
+        .then(function(savedSpec) {
             if (! _.isEqual(spec, savedSpec)) {
-                return db.execTemplate('__create_entity', {
-                    tableName: schema + '.' + table,
-                    columnDefinitions: fieldsToDDL(spec.fields),
-                    refDefinitions: fieldsToDDL(spec.refs, true),
-                    hasId: !!spec.fields.id
-                })
-                .then(function() {
-                    return saveSpec(fullName, spec);
-                });
+                return doSpecUpdate(specName, spec);
             }
         });
     };

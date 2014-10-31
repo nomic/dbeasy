@@ -47,6 +47,18 @@ function getKeyPath(obj, keyPath) {
     return obj;
 }
 
+//http://stackoverflow.com/questions/7616461/generate-a-hash-from-string-in-javascript-jquery
+function hashCode(str) {
+  var hash = 0, i, chr, len;
+  if (str.length === 0) return hash;
+  for (i = 0, len = str.length; i < len; i++) {
+    chr   = str.charCodeAt(i);
+    hash  = ((hash << 5) - hash) + chr;
+    hash |= 0; // Convert to 32bit integer
+  }
+  return hash;
+}
+
 exports.parseNamedParams = parseNamedParams;
 function parseNamedParams(text) {
     var paramsRegex = /\$([0-9]+):\ *([a-zA-Z_\.\$]+)/mg,
@@ -310,6 +322,21 @@ function connect(options) {
                 return conn.end().then(function() {
                     return working;
                 });
+            });
+        });
+    };
+
+    db.synchronize = function(lockName, workFn) {
+        var lockNum = hashCode(lockName);
+        return onConnection( function(conn) {
+            return conn.query(
+                'SELECT pg_advisory_lock(' + lockNum + ');')
+            .then(function() {
+                return workFn();
+            })
+            .finally(function() {
+                return conn.query(
+                    'SELECT pg_advisory_unlock(' + lockNum + ');');
             });
         });
     };
