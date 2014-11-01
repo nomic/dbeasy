@@ -139,11 +139,15 @@ function connect(options) {
 
     function getInsertContext(specName, data) {
         var tableName = _str.underscored(specName);
+        // Do not save derived values.
+        data = _.omit(data, _.keys(derivations[specName]));
+
         return getColumnInfo(tableName)
         .then(function(cols) {
             var inputData = {};
             inputData[BAG_COL] = {};
-            data = _.clone(data);
+
+
             var fieldNames = [];
             // Fields that have a matching column
             var placed = [];
@@ -333,7 +337,6 @@ function connect(options) {
             throw new Error('Malformed spec; unknown keys: ' + unknownKeys);
         }
         derivations[specName] = spec.derived;
-        delete spec.derived;
 
         spec.fields = addDefaultFields(spec.fields, {
             id: 'bigint NOT NULL',

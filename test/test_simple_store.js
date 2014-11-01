@@ -277,10 +277,17 @@ suite('Store', function() {
     return store.insert('bigBiz.emp', {
       // http://en.wikipedia.org/wiki/Mel_Blanc
       firstName: 'Mel',
-      lastName: 'Blank'
+      lastName: 'Blank',
+      name: 'ignored'
     })
     .then(function(result) {
       expect(result).to.have.property('name', 'Mel Blank');
+      return store.queryRaw('SELECT * FROM big_biz.emp WHERE id=$1', result.id)
+      .then(_.first);
+    })
+    .then(function(result) {
+      expect(result).to.have.property('first_name');
+      expect(result.__bag).to.not.have.property('name');
     });
   });
 
