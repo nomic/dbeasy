@@ -31,7 +31,7 @@ suite('Store', function() {
         });
     })
     .then(function() {
-      return store.upsert('foo.fooBar', {creator: {id: '9'}});
+      return store.upsert('foo.fooBar', {});
     })
     .then(function() {
       return Promise.all([
@@ -41,7 +41,6 @@ suite('Store', function() {
     })
     .spread(function(getterResult, queryResult) {
       expect(getterResult).to.have.property('id', '1');
-      expect(getterResult.creator).to.eql({id: '9'});
       expect(getterResult.created).to.be.a('Date');
       expect(getterResult.updated).to.be.a('Date');
       expect(getterResult).to.not.have.property('__deleted');
@@ -226,12 +225,10 @@ suite('Store', function() {
       }
     });
     return store.upsert('bigBiz.emp', {
-      creatorId: '3',
       firstName: 'Mel',
       deptId: '1',
     })
     .then(function(result) {
-      expect(result.creator).to.have.property('id', '3');
       expect(result.dept).to.have.property('id', '1');
     });
   });
@@ -252,12 +249,12 @@ suite('Store', function() {
 
   test('findOne()', function() {
     store.addSpec('bigBiz.emp', {});
-    return store.upsert('bigBiz.emp', {creatorId: '99'})
+    return store.upsert('bigBiz.emp', {})
     .then(function() {
-      return store.findOne('bigBiz.emp', {creatorId: '99'});
+      return store.findOne('bigBiz.emp', {id: '1'});
     })
     .then(function(result) {
-      expect(result.creator).to.have.property('id', '99');
+      expect(result).to.have.property('id', '1');
     });
   });
 

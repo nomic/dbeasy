@@ -341,7 +341,6 @@ function connect(options) {
 
         spec.fields = addDefaultFields(spec.fields, {
             id: 'bigint NOT NULL',
-            creatorId: 'bigint NOT NULL',
             created: 'timestamp without time zone DEFAULT now() NOT NULL',
             updated: 'timestamp without time zone DEFAULT now() NOT NULL',
         });
