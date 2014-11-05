@@ -9,6 +9,7 @@ var Promise = require('bluebird'),
     expect = require('chai').expect,
     assert = require('assert'),
     util = require('./util');
+Promise.longStackTraces();
 
 suite('Store', function() {
 
@@ -69,7 +70,7 @@ suite('Store', function() {
     .then(function(fooBar) {
       expect(fooBar).to.have.property('id');
       fooBar.creator.id = '11';
-      return store.update('foo.fooBar', fooBar);
+      return store.update('foo.fooBar', _.pick(fooBar, 'id'), fooBar);
     })
     .then(function(fooBar) {
       expect(fooBar.creator).to.have.property('id', '11');

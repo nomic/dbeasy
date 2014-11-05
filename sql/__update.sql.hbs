@@ -2,5 +2,6 @@
 -- ${{@key}}: {{this}}{{/each}}
 --
 UPDATE {{tableName}} SET ({{colNamesStr}}) = ({{colValsStr}})
- WHERE id = $1
+ WHERE {{#each whereColBinds}}{{this}} = ${{@key}}
+   AND {{/each}}__deleted IS NULL
 RETURNING *;

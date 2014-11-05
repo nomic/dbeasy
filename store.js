@@ -52,6 +52,13 @@ function connect(options) {
             removeSysColumns)
     });
 
+    var defaultFields = {
+        id: 'bigint NOT NULL',
+        created: 'timestamp without time zone DEFAULT now() NOT NULL',
+        updated: 'timestamp without time zone DEFAULT now() NOT NULL',
+    };
+    var neverUpdated = ['id', 'created'];
+
     var db = client.connect(options);
     db.prepareDir(path.join(__dirname, 'sql'));
 
@@ -144,6 +151,9 @@ function connect(options) {
 
         return getColumnInfo(tableName)
         .then(function(cols) {
+            cols = _.reject(cols, function(col) {
+                return _.contains(neverUpdated, col.columnName);
+            });
             var inputData = {};
             inputData[BAG_COL] = {};
 
@@ -211,6 +221,20 @@ function connect(options) {
                 }
             };
 
+        });
+    }
+
+    function addUpdateContext(onInsertContext, whereProps) {
+        return onInsertContext.then(function(ctx) {
+            ctx.templateVars.whereColBinds = {};
+            var nextBindVar = _.keys(ctx.templateVars.bindVars).length + 1;
+            _.each(whereProps, function(val, name) {
+                ctx.inputData[name] = val;
+                ctx.templateVars.bindVars[nextBindVar] = name;
+                ctx.templateVars.whereColBinds[nextBindVar] = name;
+                nextBindVar++;
+            });
+            return ctx;
         });
     }
 
@@ -339,11 +363,7 @@ function connect(options) {
         derivations[specName] = spec.derived;
         delete spec.derived;
 
-        spec.fields = addDefaultFields(spec.fields, {
-            id: 'bigint NOT NULL',
-            created: 'timestamp without time zone DEFAULT now() NOT NULL',
-            updated: 'timestamp without time zone DEFAULT now() NOT NULL',
-        });
+        spec.fields = addDefaultFields(spec.fields, defaultFields);
 
         onSpecs = onSpecs
         .then(function() {
@@ -358,7 +378,7 @@ function connect(options) {
 
     ss.upsert = function(name, data) {
         return (data.id
-            ? ss.update(name, data)
+            ? ss.update(name, _.pick(data, 'id'), data)
             : ss.insert(name, data)
         );
     };
@@ -378,10 +398,11 @@ function connect(options) {
         .then(_.compose(first, derive(name)));
     };
 
-    ss.update = function(name, data) {
+    ss.update = function(name, whereProps, data) {
+        data = _.omit(data, _.keys(defaultFields));
         return onSpecs
         .then(function() {
-            return getInsertContext(name, data);
+            return addUpdateContext(getInsertContext(name, data), whereProps);
         })
         .then(function(ctx) {
             return ss.execTemplate(
