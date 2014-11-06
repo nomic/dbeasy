@@ -9,6 +9,7 @@ var Promise = require('bluebird'),
     expect = require('chai').expect,
     assert = require('assert'),
     util = require('./util');
+
 Promise.longStackTraces();
 
 suite('Store', function() {
@@ -17,9 +18,14 @@ suite('Store', function() {
 
 
   setup(function() {
-    store = util.createStore({poolSize: 3});
-    return store.dropNamespace('bigBiz')
-    .catch(_.noop);
+    return (store
+      ? store.close()
+      : Promise.resolve())
+    .then(function() {
+      store = util.createStore({poolSize: 3, debug: true});
+      return store.dropNamespace('bigBiz')
+      .catch(_.noop);
+    });
   });
 
   test('Operations on a default entity', function() {
