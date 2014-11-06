@@ -5,7 +5,8 @@ var path = require('path'),
     Promise = require('bluebird'),
     client = require('./client'),
     SYS_COL_PREFIX = '__',
-    BAG_COL = SYS_COL_PREFIX + 'bag';
+    BAG_COL = SYS_COL_PREFIX + 'bag',
+    assert = require('assert');
 
 exports.BAG_COL = BAG_COL;
 
@@ -144,7 +145,8 @@ function connect(options) {
         return db.exec('__save_spec', {name: specName, spec: spec});
     }
 
-    function getInsertContext(specName, data) {
+    function getWriteContext(specName, data, opts) {
+        assert(opts.partial !== undefined);
         var tableName = _str.underscored(specName);
         // Do not save derived values.
         data = _.omit(data, _.keys(derivations[specName]));
@@ -193,7 +195,7 @@ function connect(options) {
                     return;
                 }
                 var fieldName = _str.camelize(colName);
-                if (inputData[fieldName] === undefined) {
+                if (opts.partial && inputData[fieldName] === undefined) {
                     return;
                 }
                 colNames.push(colName);
@@ -227,7 +229,7 @@ function connect(options) {
         });
     }
 
-    function addUpdateContext(onInsertContext, whereProps) {
+    function addWhereContext(onInsertContext, whereProps) {
         return onInsertContext.then(function(ctx) {
             ctx.templateVars.whereColBinds = {};
             var nextBindVar = _.keys(ctx.templateVars.bindVars).length + 1;
@@ -379,17 +381,10 @@ function connect(options) {
         });
     };
 
-    ss.upsert = function(name, data) {
-        return (data.id
-            ? ss.update(name, _.pick(data, 'id'), data)
-            : ss.insert(name, data)
-        );
-    };
-
     ss.insert = function(name, data) {
         return onSpecs
         .then(function() {
-            return getInsertContext(name, data);
+            return getWriteContext(name, data, {partial: false});
         })
         .then(function(ctx) {
             return ss.execTemplate(
@@ -401,11 +396,20 @@ function connect(options) {
         .then(_.compose(first, derive(name)));
     };
 
-    ss.update = function(name, whereProps, data) {
+    ss.replace = function(name, whereProps, data) {
+        return ss.update(name, whereProps, data, {partial: false});
+    };
+
+    ss.update = function(name, whereProps, data, opts) {
+        opts = _.defaults(opts || {}, {
+            partial: true
+        });
         data = _.omit(data, _.keys(defaultFields));
         return onSpecs
         .then(function() {
-            return addUpdateContext(getInsertContext(name, data), whereProps);
+            return addWhereContext(
+                getWriteContext(name, data, opts),
+                whereProps);
         })
         .then(function(ctx) {
             return ss.execTemplate(

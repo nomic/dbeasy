@@ -22,7 +22,7 @@ suite('Store', function() {
       ? store.close()
       : Promise.resolve())
     .then(function() {
-      store = util.createStore({poolSize: 3, debug: true});
+      store = util.createStore({poolSize: 3});
       return store.dropNamespace('bigBiz')
       .catch(_.noop);
     });
@@ -38,7 +38,7 @@ suite('Store', function() {
         });
     })
     .then(function() {
-      return store.upsert('foo.fooBar', {});
+      return store.insert('foo.fooBar', {});
     })
     .then(function() {
       return Promise.all([
@@ -69,17 +69,6 @@ suite('Store', function() {
       expect(getterResults).to.be.null;
       expect(queryResults).to.have.length(1);
       expect(queryResults[0].__deleted).to.be.a('Date');
-    })
-    .then(function() {
-      return store.insert('foo.fooBar', {creator: {id: '15'}});
-    })
-    .then(function(fooBar) {
-      expect(fooBar).to.have.property('id');
-      fooBar.creator.id = '11';
-      return store.update('foo.fooBar', _.pick(fooBar, 'id'), fooBar);
-    })
-    .then(function(fooBar) {
-      expect(fooBar.creator).to.have.property('id', '11');
     });
   });
 
@@ -90,7 +79,7 @@ suite('Store', function() {
         deptId: 'bigint'
       }
     });
-    return store.upsert('bigBiz.emp', {
+    return store.insert('bigBiz.emp', {
       creator: {id: '3'},
       firstName: 'Mel',
     })
@@ -100,12 +89,13 @@ suite('Store', function() {
       expect(result).to.not.have.property('dept');
     })
     .then(function() {
-      return store.upsert('bigBiz.emp', {
-        id: '1',
-        creator: {id: '3'},
-        firstName: 'Melly',
-        interests: {favoriteSandwich: 'Falafel'},
-      });
+      return store.replace('bigBiz.emp',
+        { id: '1' },
+        {
+          creator: {id: '3'},
+          firstName: 'Melly',
+          interests: {favoriteSandwich: 'Falafel'},
+        });
     })
     .then(function(result) {
       expect(result).to.have.property('id', '1');
@@ -113,6 +103,17 @@ suite('Store', function() {
       expect(result).to.have.property('interests');
       expect(result.interests).to.eql({favoriteSandwich: 'Falafel'});
       expect(result).to.not.have.property('dept');
+    })
+    .then(function() {
+      return store.update('bigBiz.emp',
+        { id: '1' },
+        {
+          deptId: '4',
+        });
+    })
+    .then(function(result) {
+      expect(result).to.have.property('firstName', 'Melly');
+      expect(result.dept).to.have.property('id', '4');
     });
 
   });
@@ -129,7 +130,7 @@ suite('Store', function() {
         deptId: 'bigint'
       }
     });
-    return store.upsert('bigBiz.emp', {
+    return store.insert('bigBiz.emp', {
       creator: {id: '3'},
       dept: {id: '2'}
     }).then(function(emp) {
@@ -155,7 +156,7 @@ suite('Store', function() {
         creatorId: false
       }
     });
-    return store.upsert('bigBiz.emp', {
+    return store.insert('bigBiz.emp', {
       dept: {id: '2'}
     }).then(function(emp) {
       return store.getById('bigBiz.emp', emp.id);
@@ -188,7 +189,7 @@ suite('Store', function() {
         deptId: 'bigint'
       }
     });
-    return store.upsert('bigBiz.emp', {
+    return store.insert('bigBiz.emp', {
       creator: {id: 1},
       firstName: 'Joe'
     })
@@ -214,7 +215,7 @@ suite('Store', function() {
         firstName: 'text NOT NULL'
       }
     });
-    return store.upsert({
+    return store.insert({
       creator: {id: '3'},
       firstName: 'Mel',
     })
@@ -231,7 +232,7 @@ suite('Store', function() {
         deptId: 'bigint'
       }
     });
-    return store.upsert('bigBiz.emp', {
+    return store.insert('bigBiz.emp', {
       firstName: 'Mel',
       deptId: '1',
     })
@@ -247,7 +248,7 @@ suite('Store', function() {
         creatorId: false
       }
     });
-    return store.upsert('bigBiz.emp', {})
+    return store.insert('bigBiz.emp', {})
     .then(function(result) {
       expect(result).to.not.have.property('id');
       expect(result).to.not.have.property('creator');
@@ -256,7 +257,7 @@ suite('Store', function() {
 
   test('findOne()', function() {
     store.addSpec('bigBiz.emp', {});
-    return store.upsert('bigBiz.emp', {})
+    return store.insert('bigBiz.emp', {})
     .then(function() {
       return store.findOne('bigBiz.emp', {id: '1'});
     })
