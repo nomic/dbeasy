@@ -114,6 +114,8 @@ suite('Store', function() {
     .then(function(result) {
       expect(result).to.have.property('firstName', 'Melly');
       expect(result.dept).to.have.property('id', '4');
+      assert(result.updated > result.created,
+        'expected updated to be greater than created');
     });
 
   });

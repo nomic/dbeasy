@@ -103,11 +103,13 @@ function connect(options) {
             if (isDebug) console.log.apply(console, arguments);
         },
         info: console.log,
+        warn: console.log,
         error: console.error,
     };
     options = options || {};
     var isDebug = !!options.debug;
     var db = {};
+    db._logger = logger;
     db.__prepared = {};
     db.__templates = {};
     db.__loadpath = options.loadpath || "";

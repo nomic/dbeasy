@@ -58,7 +58,7 @@ function connect(options) {
         created: 'timestamp without time zone DEFAULT now() NOT NULL',
         updated: 'timestamp without time zone DEFAULT now() NOT NULL',
     };
-    var neverUpdated = ['id', 'created'];
+    var neverUpdated = ['id', 'created', 'updated'];
 
     var db = client.connect(options);
     db.prepareDir(path.join(__dirname, 'sql'));
@@ -146,6 +146,8 @@ function connect(options) {
     }
 
     function getWriteContext(specName, data, opts) {
+        var isPartialUpdate = opts.partial || false;
+
         assert(opts.partial !== undefined);
         var tableName = _str.underscored(specName);
         // Do not save derived values.
@@ -154,19 +156,26 @@ function connect(options) {
         return getColumnInfo(tableName)
         .then(function(cols) {
             cols = _.reject(cols, function(col) {
-                return _.contains(neverUpdated, col.columnName);
+                return (
+                    _.contains(neverUpdated, col.columnName)
+                    || (isPartialUpdate && (col.columnName === BAG_COL)));
             });
             var inputData = {};
-            inputData[BAG_COL] = {};
+            var colNames = [];
+            var colVals = [];
+            var bindNum = 1;
+            var bindVars = {};
 
-
-            var fieldNames = [];
             // Fields that have a matching column
             var placed = [];
-            _.each(_.pluck(cols, 'columnName'), function(colName) {
+            _.each(cols, function(col) {
+                var colName = col.columnName;
+                if (_str.startsWith(colName, SYS_COL_PREFIX)) {
+                    return;
+                }
+
                 var fieldName = _str.camelize(colName),
                     val = data[fieldName];
-                placed.push(fieldName);
                 if (!val && fieldName.slice(-2) === 'Id') {
                     //check for nested id
                     var objField = fieldName.slice(0,-2);
@@ -174,47 +183,45 @@ function connect(options) {
                     val = data[objField];
                     val = val && val.id;
                 }
-                if (val) {
-                    inputData[fieldName] = val;
-                    fieldNames.push(fieldName);
-                }
-            });
-            var colNames = [];
-            var colVals = [];
-            inputData[BAG_COL] = _.omit(data, placed);
-            var valNum = 1;
-            _.each(cols, function(col) {
-                var colName = col.columnName;
-                if (colName === BAG_COL) {
-                    colNames.push(colName);
-                    colVals.push('$' + valNum);
-                    valNum++;
+
+                if (!val && isPartialUpdate) {
                     return;
                 }
-                if (_str.startsWith(colName, SYS_COL_PREFIX)) {
-                    return;
-                }
-                var fieldName = _str.camelize(colName);
-                if (opts.partial && inputData[fieldName] === undefined) {
-                    return;
-                }
+
                 colNames.push(colName);
 
-                var val = inputData[fieldName];
-                if (val) {
-                    colVals.push('$' + valNum);
-                    valNum++;
-                } else {
+                if (!val) {
                     colVals.push(col.columnDefault ? 'DEFAULT' : 'NULL');
+                    return;
                 }
+
+                inputData[fieldName] = val;
+                colVals.push('$' + bindNum);
+                bindVars[bindNum] = fieldName;
+                bindNum++;
+                placed.push(fieldName);
+
             });
 
-            var bindVars = _.transform(
-                fieldNames.concat([BAG_COL]),
-                function(result, val, idx) {
-                    result[idx+1] = val;
-                    return result;
-                }, {});
+            var bagData = _.omit(data, placed);
+
+            if (!_.isEmpty(bagData)) {
+                if (isPartialUpdate) {
+                    db._logger.warn(
+                        '__bag vals ignored; partial update on __bag unsupported', {
+                        specName: specName,
+                        values: bagData
+                    });
+                } else {
+                    inputData[BAG_COL] = bagData;
+                    bindVars[bindNum] = BAG_COL;
+                    colNames.push(BAG_COL);
+                    colVals.push('$' + bindNum);
+                }
+            }
+
+            colNames.push('updated');
+            colVals.push('DEFAULT');
 
             return {
                 inputData: inputData,
