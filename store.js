@@ -324,7 +324,7 @@ function connect(options) {
             _.pick(
                 ss,
                 'getByIds', 'getById', 'deleteById', 'deleteByIds',
-                'insert', 'update', 'upsert', 'find', 'findOne'),
+                'insert', 'update', 'replace', 'find', 'findOne'),
             function(fn) { return _.partial(fn, specName); });
         addDbFns(store);
         return store;
