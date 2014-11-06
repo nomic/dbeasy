@@ -189,12 +189,15 @@ function connect(options) {
                     valNum++;
                     return;
                 }
-                if (_str.startsWith(colName, SYS_COL_PREFIX)
-                    && colName !== BAG_COL) {
+                if (_str.startsWith(colName, SYS_COL_PREFIX)) {
+                    return;
+                }
+                var fieldName = _str.camelize(colName);
+                if (inputData[fieldName] === undefined) {
                     return;
                 }
                 colNames.push(colName);
-                var fieldName = _str.camelize(colName);
+
                 var val = inputData[fieldName];
                 if (val) {
                     colVals.push('$' + valNum);
