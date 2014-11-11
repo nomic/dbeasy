@@ -11,8 +11,11 @@ _.each(['host', 'database', 'user', 'port', 'password', 'url'], function(key) {
 });
 
 exports.createDb = createDb;
-function createDb(testOpts) {
-    return dbeasy.client( _.extend(_.clone(pgconf), testOpts) );
+function createDb(poolOpts, clientOpts) {
+    return dbeasy.client(
+      dbeasy.pool(_.extend(_.clone(pgconf), poolOpts) ),
+      clientOpts
+    );
 }
 
 exports.createStore = createStore;

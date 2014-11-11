@@ -11,7 +11,7 @@ suite("Client", function() {
     var db;
 
     var createTestTable = function(db) {
-        return db.onConnection( function(conn) {
+        return db.useConnection( function(conn) {
             return Promise.all([
                 conn.query("CREATE TABLE foo (bar int);"),
                 conn.query("CREATE TABLE fooid (id int, bar int);")
@@ -20,7 +20,7 @@ suite("Client", function() {
     };
 
     var dropTestTable = function(db) {
-        return db.onConnection( function(conn) {
+        return db.useConnection( function(conn) {
             return Promise.all([
                 conn.query("DROP TABLE IF EXISTS foo;"),
                 conn.query("DROP TABLE IF EXISTS fooid;")
@@ -57,9 +57,9 @@ suite("Client", function() {
         var gotSecondConnection = false;
 
         var grab2Conns = function() {
-            return db.onConnection( function() {
+            return db.useConnection( function() {
                 gotFirstConnection = true;
-                return db.onConnection( function() {
+                return db.useConnection( function() {
                     gotSecondConnection = false;
                     return;
                 });
@@ -85,7 +85,7 @@ suite("Client", function() {
 
         Promise.all(
             _.map(_.range(10), function(i) {
-                return db.onConnection(function() {
+                return db.useConnection(function() {
                     gotConnection[i] = true;
                     return Promise.delay(20);
                 });
@@ -102,16 +102,16 @@ suite("Client", function() {
         db = createDb({poolSize: 1});
         var gotConnection = _.map(_.range(3), function() { return false; });
 
-        var connecting = db.onConnection( function() {
+        var connecting = db.useConnection( function() {
             gotConnection[0] = true;
             return Promise.delay(20);
         }).then( function() {
-            return db.onConnection( function() {
+            return db.useConnection( function() {
                 gotConnection[1] = true;
                 return Promise.delay(20);
             });
         }).then( function() {
-            return db.onConnection( function() {
+            return db.useConnection( function() {
                 gotConnection[2] = true;
                 return Promise.delay(20);
             });
@@ -157,7 +157,7 @@ suite("Client", function() {
 
     test("raw connection does not auto rollback", function(done) {
         db = createDb({poolSize: 1});
-        var inserting = db.onConnection( function(conn) {
+        var inserting = db.useConnection( function(conn) {
             var querying = conn.query("INSERT INTO foo VALUES (DEFAULT);");
             var erroring = Promise.reject("error");
             return Promise.all([querying, erroring]);
@@ -172,7 +172,7 @@ suite("Client", function() {
     });
 
     test("prepare a statement", function(done) {
-        db = createDb({loadpath: __dirname, poolSize:10});
+        db = createDb({}, {loadpath: __dirname, poolSize:10});
 
         var preparing = db.prepare('test_query');
 
@@ -191,7 +191,7 @@ suite("Client", function() {
     });
 
     test("prepare all statements in a directory", function(done) {
-        db = createDb({loadpath: __dirname, poolSize:10});
+        db = createDb({}, {loadpath: __dirname, poolSize:10});
 
         db.prepareDir(__dirname + '/test_sql')
         .then(function() { return db.exec('select_1'); })
@@ -209,13 +209,13 @@ suite("Client", function() {
             "--"
         );
 
-        var actual = client.parseNamedParams(text);
+        var actual = require('../util').parseNamedParams(text);
         assert.equal(actual[0], 'foo');
         assert.equal(actual[1], 'bar');
     });
 
     test("prepare statemnt with named args", function(done) {
-        db = createDb({loadpath: __dirname, poolSize:10});
+        db = createDb({}, {loadpath: __dirname, poolSize:10});
 
         db.prepare('select_named_args')
         .then(function() {
@@ -232,7 +232,7 @@ suite("Client", function() {
     });
 
     test("prepare a statement from a template", function(done) {
-        db = createDb({loadpath: __dirname, poolSize:10});
+        db = createDb({}, {loadpath: __dirname, poolSize:10});
 
         var preparing = db.prepareTemplate('descending', 'test_query_template.sql.hbs', {direction: 'DESC'});
 
@@ -254,7 +254,7 @@ suite("Client", function() {
 
 
     test("db.execTemplate", function(done) {
-        db = createDb({loadpath: __dirname, poolSize:10});
+        db = createDb({}, {loadpath: __dirname, poolSize:10});
 
         var preparing = db.prepare('test_query_template.sql.hbs');
 
@@ -276,7 +276,7 @@ suite("Client", function() {
 
     test("db.exec: write then read consistency", function(done) {
 
-        db = createDb({loadpath: __dirname, poolSize:10});
+        db = createDb({}, {loadpath: __dirname, poolSize:10});
         var counter = 0;
 
         db.prepare('update_stmt', 'UPDATE fooid SET bar = bar+1 WHERE id = 0;');

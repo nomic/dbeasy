@@ -7,22 +7,9 @@ var pg = require('pg').native,
     Promise = require('bluebird'),
     fs = Promise.promisifyAll(require('fs')),
     handlebars = require('handlebars'),
-    crypto = require('crypto');
+    crypto = require('crypto'),
+    util = require('./util');
 
-
-function conString(pgconf) {
-    if (pgconf.url) return pgconf.url;
-
-    var host = pgconf.host || "localhost";
-    var port = pgconf.port || 5432;
-    var database = pgconf.database || "postgres";
-    var userString = pgconf.user
-        ? pgconf.user + (
-            pgconf.password ? ":" + pgconf.password : ""
-        ) + "@"
-        : "";
-    return "postgres://"+userString+host+":"+port+"/"+database+"?ssl=on";
-}
 
 function loadQuery(loadpath, fileName) {
     return fs.readFileAsync(loadpath+"/"+fileName).then(function(data) {
@@ -59,17 +46,6 @@ function hashCode(str) {
   return hash;
 }
 
-exports.parseNamedParams = parseNamedParams;
-function parseNamedParams(text) {
-    var paramsRegex = /\$([0-9]+):\ *([a-zA-Z_\.\$]+)/mg,
-        matches,
-        params = [];
-    while (matches = paramsRegex.exec(text)) {
-        params[parseInt(matches[1], 10) - 1] = matches[2];
-    }
-    return params;
-}
-
 exports.envToConfig = function(prefix) {
     var pgconf = {};
     _.each(['host', 'user', 'port', 'password', 'database'], function(key) {
@@ -84,37 +60,29 @@ exports.encodeArray = function(arr, conformer) {
     return '{' + _.map(arr, conformer).join(',') + '}';
 };
 
-exports.jsifyColumns = jsifyColumns;
-function jsifyColumns(row) {
-    return _.transform(row, function(result, val, key) {
-        if (val === null) return;
-        if (key.slice(-3) === '_id')
-            result[_str.camelize(key.slice(0,-3))] = {id: val};
-        else
-            result[_str.camelize(key)] = val;
-        return result;
-    }, {});
-}
+module.exports = function client(pool, options) {
+    if (!pool) {
+        throw new TypeError('Expectd a connection pool as first argument');
+    }
 
-exports.connect = connect;
-function connect(options) {
+    options = _.defaults(options || {}, {
+        debug: false
+    });
     var logger = options.logger || {
         debug: function() {
-            if (isDebug) console.log.apply(console, arguments);
+            if (options.debug) console.log.apply(console, arguments);
         },
         info: console.log,
         warn: console.log,
         error: console.error,
     };
-    options = options || {};
-    var isDebug = !!options.debug;
+
     var db = {};
     db._logger = logger;
     db.__prepared = {};
     db.__templates = {};
     db.__loadpath = options.loadpath || "";
-    var requestedPoolSize = options.poolSize || pg.defaults.poolSize;
-    pg.defaults.poolSize = requestedPoolSize;
+
     var egress = options.egress
         ? function(rows) {
             return _.map(rows, options.egress);
@@ -122,146 +90,152 @@ function connect(options) {
         : function(rows) { return rows; };
 
     pg = Promise.promisifyAll(pg);
-    // connect to the postgres db defined in conf
-    var onConnection = function(fn) {
-        return pg.connectAsync(conString(options))
-            .then(function(args) {
-                var ctx = {};
-                var conn = args[0];
-                var connQuery = Promise.promisify(conn.query, conn);
-                var done = args[1];
 
-                ctx.__conn = conn;
-                ctx.begin = function() {
-                    conn.query('BEGIN');
-                };
-                ctx.end = function() {
-                    return connQuery('END');
-                };
-                ctx.query = function(text, vals) {
-                    return ctx.queryRaw(text, vals)
-                    .then(function(results) {
-                        return results ? egress(results) : null;
-                    });
-                };
-                ctx.queryRaw = function(text, vals) {
-                    if (vals !== undefined) { vals = _.rest(arguments); }
-                    var statements = _.isArray(text) ? text : [text];
-                    return (function next(results) {
-                        var statement = statements.shift();
-                        if (!statement) return results.pop();
 
-                        return connQuery(text, vals)
-                            .then(function(result) {
-                                results.push(result.rows ? result.rows : null);
-                                return next(results);
-                            })
-                            .catch(function(err) {
-                                throw error('queryRaw failed', {text: text, vals: vals}, err);
-                            });
-                    })([]);
-                };
-                ctx.execTemplate = function(templateKey, templateParams, values) {
-                    var key = templateKey + JSON.stringify(templateParams);
+    function Connection(pgConnection) {
+        this.pgConnection = pgConnection;
+        // Bind all the methods to the instance;
+        _.bindAll(this, _.keys(Connection.prototype));
+    }
 
-                    // Max length of prepared statement is NAMEDATALEN (64)
-                    var md5sum = crypto.createHash('md5');
-                    md5sum.update(key);
-                    key = md5sum.digest('hex');
+    Connection.prototype.begin = function() {
+        var self = this;
+        return self.pgConnection.query('BEGIN');
+    };
 
-                    if (db.__prepared[key]) {
-                        return ctx.exec(key, values);
-                    }
+    Connection.prototype.end = function() {
+        var self = this;
+        return self.pgConnection.query('END');
+    };
 
-                    var template = db.__templates[templateKey];
-                    if (! template) {
-                        throw error("template not found: " + templateKey);
-                    }
-                    var text = template(templateParams);
-                    prepare(key, null, text);
-                    return ctx.exec(key, values);
-                };
-                ctx.exec = function(key, values) {
-                    if (values !== undefined) { values = _.rest(arguments); }
-                    var prepared = db.__prepared[key];
-                    if (! prepared) {
-                        throw error("prepared statement not found: " + key);
-                    }
-                    if (values && !_.isArray(values[0]) && _.isObject(values[0])) {
-                        //then assume we have named params
-                        if (!prepared.namedParams) {
-                            throw error("prepared statement does not have named params defined: " + key);
-                        }
-                        var namedValues = values[0];
-                        values = _.map(prepared.namedParams, function(paramName) {
-                            var val = getKeyPath(namedValues, paramName);
-                            if (!val && _str.endsWith(paramName, 'Id')) {
-                                paramName = paramName.slice(0,-2) + '.id';
-                                val = getKeyPath(namedValues, paramName.clice);
-                            }
-                            return val;
-                        });
-                    }
+    Connection.prototype.query = function(text, vals) {
+        return this.queryRaw(text, vals)
+        .then(function(results) {
+            return results ? egress(results) : null;
+        });
+    };
 
-                    var statements = prepared.text.split(/;\s*$/m);
-                    return (function next(results) {
-                        var statement = statements.shift();
-                        if (!statement) return results.pop();
+    Connection.prototype.queryRaw = function(text, vals) {
+        var self = this;
+        if (vals !== undefined) { vals = _.rest(arguments); }
+        var statements = _.isArray(text) ? text : [text];
+        return (function next(results) {
+            var statement = statements.shift();
+            if (!statement) return results.pop();
 
-                        var opts = {
-                            name: results.length + '.' + key,
-                            text: statement + ';',
-                            values: values,
-                            types: prepared.types
-                        };
-                        logger.debug([
-                            '>>>> DBEasy execute ',
-                            JSON.stringify(_.omit(opts, 'text')),
-                            opts.text,
-                            '<<<<'].join('\n'));
-                        return connQuery(opts).then(function(result) {
-                            results.push(result.rows ? egress(result.rows) : null);
-                            return next(results);
-                        })
-                        .catch(function(err) {
-                            if (err && err.code) {
-                                if (err.code.search("22") === 0) {
-                                    // Codes in the 22* range (data exceptions) are assumed
-                                    // to be the client's fault (ie, using an id which
-                                    // is beyond the range representable by bigint).
-                                    // - reference: http://www.postgresql.org/docs/9.2/static/errcodes-appendix.html
-                                    throw error(opts.name || "anonymous query", opts, err);
-                                } else if (err.code.search("23") === 0) {
-                                    // Integrity constraint violation, just rethrow it
-                                    // and allow higher-lever wrappers to take action.
-                                    throw err;
-                                } else if (err.code.search("40P01") === 0) {
-                                    //TODO:2013-06-28:gsilk: special logging for deadlocks?
-                                    throw err;
-                                }
-                            }
-                            logger.error([
-                                '>xx> DBEasy error ',
-                                err,
-                                '<xx<'].join('\n'));
-                            throw error('exec failed', {key: key, values: values}, err);
-                        });
-                    })([]);
-                };
+            return self.pgConnection.query(text, vals)
+                .then(function(result) {
+                    results.push(result.rows ? result.rows : null);
+                    return next(results);
+                })
+                .catch(function(err) {
+                    throw error('queryRaw failed', {text: text, vals: vals}, err);
+                });
+        })([]);
+    };
 
-                var rollback = function(err) {
-                    return connQuery("ROLLBACK").then(function() {
-                        throw err;
-                    });
-                };
+    Connection.prototype.execTemplate = function(templateKey, templateParams, values) {
+        var self = this;
+        var key = templateKey + JSON.stringify(templateParams);
 
-                return Promise.try(function() { return fn(ctx); })
-                .catch(rollback)
-                .finally(done);
+        // Max length of prepared statement is NAMEDATALEN (64)
+        var md5sum = crypto.createHash('md5');
+        md5sum.update(key);
+        key = md5sum.digest('hex');
 
-            }).catch(function(err) {
-                throw err;
+        if (db.__prepared[key]) {
+            return this.exec(key, values);
+        }
+
+        var template = db.__templates[templateKey];
+        if (! template) {
+            throw error("template not found: " + templateKey);
+        }
+        var text = template(templateParams);
+        prepare(key, null, text);
+        return self.exec(key, values);
+    };
+
+    Connection.prototype.exec = function(key, values) {
+        var self = this;
+        if (values !== undefined) { values = _.rest(arguments); }
+        var prepared = db.__prepared[key];
+        if (! prepared) {
+            throw error("prepared statement not found: " + key);
+        }
+        if (values && !_.isArray(values[0]) && _.isObject(values[0])) {
+            //then assume we have named params
+            if (!prepared.namedParams) {
+                throw error("prepared statement does not have named params defined: " + key);
+            }
+            var namedValues = values[0];
+            values = _.map(prepared.namedParams, function(paramName) {
+                var val = getKeyPath(namedValues, paramName);
+                if (!val && _str.endsWith(paramName, 'Id')) {
+                    paramName = paramName.slice(0,-2) + '.id';
+                    val = getKeyPath(namedValues, paramName.clice);
+                }
+                return val;
             });
+        }
+
+        var statements = prepared.text.split(/;\s*$/m);
+        return (function next(results) {
+            var statement = statements.shift();
+            if (!statement) return results.pop();
+
+            var opts = {
+                name: results.length + '.' + key,
+                text: statement + ';',
+                values: values,
+                types: prepared.types
+            };
+            logger.debug([
+                '>>>> DBEasy execute ',
+                JSON.stringify(_.omit(opts, 'text')),
+                opts.text,
+                '<<<<'].join('\n'));
+            return self.pgConnection.query(opts).then(function(result) {
+                results.push(result.rows ? egress(result.rows) : null);
+                return next(results);
+            })
+            .catch(function(err) {
+                if (err && err.code) {
+                    if (err.code.search("22") === 0) {
+                        // Codes in the 22* range (data exceptions) are assumed
+                        // to be the client's fault (ie, using an id which
+                        // is beyond the range representable by bigint).
+                        // - reference: http://www.postgresql.org/docs/9.2/static/errcodes-appendix.html
+                        throw error(opts.name || "anonymous query", opts, err);
+                    } else if (err.code.search("23") === 0) {
+                        // Integrity constraint violation, just rethrow it
+                        // and allow higher-lever wrappers to take action.
+                        throw err;
+                    } else if (err.code.search("40P01") === 0) {
+                        //TODO:2013-06-28:gsilk: special logging for deadlocks?
+                        throw err;
+                    }
+                }
+                logger.error([
+                    '>xx> DBEasy error ',
+                    err,
+                    '<xx<'].join('\n'));
+                throw error('exec failed', {key: key, values: values}, err);
+            });
+        })([]);
+    };
+
+    var useConnection = function(fn) {
+        return pool.useConnection(function(pgConnection) {
+            return Promise.try(fn, new Connection(pgConnection))
+            .catch(function(err) {
+                return pgConnection.query("ROLLBACK")
+                .then(function() {
+                    throw err;
+                });
+            });
+
+        });
     };
 
     // set the load path
@@ -273,14 +247,14 @@ function connect(options) {
     // Execute a previously prepared statement
     db.exec = function(/*statement, params*/) {
         var args = _.toArray(arguments);
-        return db.onConnection(function(conn) {
+        return db.useConnection(function(conn) {
             return conn.exec.apply(conn, args);
         });
     };
 
     db.execTemplate = function(/*statement, templateParams, params*/) {
         var args = _.toArray(arguments);
-        return db.onConnection(function(conn) {
+        return db.useConnection(function(conn) {
             return conn.execTemplate.apply(conn, args);
         });
     };
@@ -288,7 +262,7 @@ function connect(options) {
     // Execute a sql query string
     db.query = function(sql /*, params*/) {
         var args = _.toArray(arguments);
-        return db.onConnection( function(conn) {
+        return db.useConnection( function(conn) {
             return conn.query.apply(sql, args);
         });
     };
@@ -297,7 +271,7 @@ function connect(options) {
     // the results through egress
     db.queryRaw = function(sql /*, params*/) {
         var args = _.toArray(arguments);
-        return db.onConnection( function(conn) {
+        return db.useConnection( function(conn) {
             return conn.queryRaw.apply(sql, args);
         });
     };
@@ -317,7 +291,7 @@ function connect(options) {
     // Generally try to avoid this.  You must understand locking
     // (and deadlocking) in postgres before using this.
     db.transaction = function(workFn) {
-        return onConnection( function(conn) {
+        return useConnection( function(conn) {
             conn.begin();
             var working = workFn(conn);
             return working.then(function() {
@@ -330,7 +304,7 @@ function connect(options) {
 
     db.synchronize = function(lockName, workFn) {
         var lockNum = hashCode(lockName);
-        return onConnection( function(conn) {
+        return useConnection( function(conn) {
             return conn.query(
                 'SELECT pg_advisory_lock(' + lockNum + ');')
             .then(function() {
@@ -354,8 +328,8 @@ function connect(options) {
     // NOTE: You shouldn't really need to use this.  This is
     // only necessary if you need fine grain control over
     // transactions.
-    db.onConnection = function(workFn) {
-        return onConnection( function(conn) {
+    db.useConnection = function(workFn) {
+        return useConnection( function(conn) {
             return workFn(conn);
         });
     };
@@ -400,12 +374,12 @@ function connect(options) {
             };
         };
         if (text) {
-            stash(text, parseNamedParams(text));
+            stash(text, util.parseNamedParams(text));
             return Promise.resolve(key);
         }
         var reading = loadQuery(path, fname)
         .then(function(text) {
-            stash(text, parseNamedParams(text));
+            stash(text, util.parseNamedParams(text));
         })
         .then(function() {
             return key;
@@ -482,19 +456,6 @@ function connect(options) {
         });
     };
 
-    db.status = function() {
-        var pool = pg.pools.all[JSON.stringify(conString(options))];
-        return {
-            connection: conString(options),
-            pool: {
-                size: pool.getPoolSize(),
-                available: pool.availableObjectsCount(),
-                waiting: pool.waitingClientsCount(),
-                maxSize: requestedPoolSize
-            }
-        };
-    };
-
     db.close = function() {
         _.each(pg.pools.all, function(pool, key) {
             pool.drain(function() {
@@ -506,6 +467,10 @@ function connect(options) {
 
     db.cleansedConfig = function() {
         return _.omit(options, "password", "logger", "egress");
+    };
+
+    db.store = function(specName) {
+        
     };
 
     return db;

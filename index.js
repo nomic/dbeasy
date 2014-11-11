@@ -1,19 +1,21 @@
 'use strict';
 
 var store = require('./store'),
-    client = require('./client');
+    client = require('./client'),
+    pool = require('./pool'),
+    util = require('./util');
 
 exports.store = function(options) {
-    return store.connect(options);
+    return store(options);
 };
 
-exports.storeFactory = function(options) {
-    return store.factory(options);
+exports.client = function(pool, options) {
+    return client(pool, options);
 };
 
-exports.client = function(options) {
-    return client.connect(options);
+exports.pool = function(options) {
+    return pool(options);
 };
 
 
-exports.jsifyColumns = client.jsifyColumns;
+exports.jsifyColumns = util.jsifyColumns;
