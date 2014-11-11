@@ -1,137 +1,32 @@
 'use strict';
-var path = require('path'),
-    _ = require('lodash'),
+var _ = require('lodash'),
     _str = require('underscore.string'),
-    Promise = require('bluebird'),
-    client = require('./client'),
-    SYS_COL_PREFIX = '__',
-    BAG_COL = SYS_COL_PREFIX + 'bag',
-    assert = require('assert');
+    assert = require('assert'),
+    util = require('./util'),
+    SYS_COL_PREFIX = util.SYS_COL_PREFIX,
+    BAG_COL = util.BAG_COL;
 
-exports.BAG_COL = BAG_COL;
+var defaultFields = {
+    id: 'bigint NOT NULL',
+    created: 'timestamp without time zone DEFAULT now() NOT NULL',
+    updated: 'timestamp without time zone DEFAULT now() NOT NULL',
+};
 
-function removeSysColumns(row) {
-    return _.transform(row, function(result, val, key) {
-        if (key === '__bag') {
-            _.extend(result, val);
-        }
-        if (key.slice(0, 2) !== SYS_COL_PREFIX) {
-            result[key] = val;
-        }
-        return result;
-    }, {});
-}
+var neverUpdated = _.keys(defaultFields);
+exports.defaultFields = defaultFields;
 
-exports.factory = factory;
-function factory(options) {
 
-    return function() {
-        var singleSchema = false;
-        var specs = {};
-        if (_.isString(arguments[0])) {
-            singleSchema = true;
-            specs[arguments[0]] = arguments[1];
-        } else {
-            specs = arguments[0];
-        }
-        var store = connect(options);
-        _.each(specs, function(spec, name) {
-            store.addSpec(name, spec);
-        });
-        return singleSchema
-            ? store(arguments[0])
-            : store;
-    };
-
-}
-
-exports.connect = connect;
-function connect(options) {
-    options = _.defaults(options, {
-        egress: _.compose(
-            client.jsifyColumns,
-            removeSysColumns)
+exports.store = function(client, storeName, options) {
+    options = _.defaults(options || {}, {
+        derived: {}
     });
 
-    var defaultFields = {
-        id: 'bigint NOT NULL',
-        created: 'timestamp without time zone DEFAULT now() NOT NULL',
-        updated: 'timestamp without time zone DEFAULT now() NOT NULL',
-    };
-    var neverUpdated = ['id', 'created', 'updated'];
-
-    var db = client.connect(options);
-    db.prepareDir(path.join(__dirname, 'sql'));
-
-    var onSpecs = ensureSpecTableExists();
-    var derivations = {};
-
-    // Expose db client functions, but only run them after
-    // specs have been processed
-    function addDbFns(store) {
-    _.extend(
-        store,
-        _.mapValues(
-            db,
-            function(val) {
-                if (!_.isFunction(val)) return val;
-                return function() {
-                    var args = arguments;
-                    return onSpecs.then(function() {
-                        return val.apply(db, args);
-                    });
-                };
-            }));
-    }
-
-    function specTableExists() {
-        return db.query([
-            'SELECT 1 FROM information_schema.tables',
-            ' WHERE table_name=\'spec\'',
-            '   AND table_schema=\'dbeasy_store\';'].join('\n'));
-    }
-
-    function ensureSpecTableExists() {
-        return specTableExists()
-        .then(function(results) {
-            if (results.length) return;
-            return db.synchronize('specTable', function() {
-                return specTableExists()
-                .then(function(results) {
-                    if (results.length) return;
-                    return db.exec('__create_spec_table');
-                });
-            });
-        });
-    }
-
-   function getSpec(specName) {
-        return db.query(
-            'SELECT spec FROM dbeasy_store.spec WHERE name = $1',
-            specName)
-        .then(function(specRows) {
-            return specRows[0] ? specRows[0].spec : null;
-        });
-    }
-
-    function fieldsToDDL(fields, isRefs) {
-        return _.transform(fields, function(ddl, spec, name) {
-            name = _str.underscored(name);
-            if (isRefs) {
-                name += '_id';
-            }
-            ddl.push([name, spec].join(' '));
-            return ddl;
-        }, []);
-    }
-
-    function ensureNamespace(namespace) {
-        return addNamespace(namespace);
-    }
+    var onReady = client.__prepareSql();
+    var store = {};
 
     function getColumnInfo(tableName) {
         var parts = tableName.split('.');
-        return db.exec('__get_table_info', {
+        return client.exec('__get_table_info', {
             schemaName: parts[0],
             tableName: parts[1]
         })
@@ -141,17 +36,13 @@ function connect(options) {
         });
     }
 
-    function saveSpec(specName, spec) {
-        return db.exec('__save_spec', {name: specName, spec: spec});
-    }
-
-    function getWriteContext(specName, data, opts) {
+    function getWriteContext(data, opts) {
         var isPartialUpdate = opts.partial || false;
 
         assert(opts.partial !== undefined);
-        var tableName = _str.underscored(specName);
+        var tableName = _str.underscored(storeName);
         // Do not save derived values.
-        data = _.omit(data, _.keys(derivations[specName]));
+        data = _.omit(data, _.keys(options.derived));
 
         return getColumnInfo(tableName)
         .then(function(cols) {
@@ -207,9 +98,9 @@ function connect(options) {
 
             if (!_.isEmpty(bagData)) {
                 if (isPartialUpdate) {
-                    db._logger.warn(
+                    client._logger.warn(
                         '__bag vals ignored; partial update on __bag unsupported', {
-                        specName: specName,
+                        storeName: storeName,
                         values: bagData
                     });
                 } else {
@@ -226,7 +117,7 @@ function connect(options) {
             return {
                 inputData: inputData,
                 templateVars: {
-                    tableName: _str.underscored(tableName),
+                    tableName: tableName,
                     bindVars: bindVars,
                     colNamesStr: colNames.join(', '),
                     colValsStr: colVals.join(', ')
@@ -250,45 +141,18 @@ function connect(options) {
         });
     }
 
-    function addNamespace(namespace) {
-        var schema = _str.underscored(namespace);
-        return db.query('SELECT * FROM information_schema.schemata WHERE schema_name = $1;', schema)
-        .then(function(results) {
-            return results.length
-                ? Promise.resolve()
-                : db.query('CREATE SCHEMA ' + schema);
-        });
-    }
-
-    // A falsey can be passed in for a default field
-    // so that it does not get added, or an alternate
-    // definition will override it.
-    function addDefaultFields(fields, defaults) {
-        var result = _.extend({}, defaults, fields);
-
-        var omit = [];
-        _.each(result, function(def, name) {
-            if (! result[name]) {
-                omit.push(name);
-            }
-        });
-
-        return _.omit(result, omit);
-    }
-
     function first(rows) {
         return _.first(rows) || null;
     }
 
-    function derive(specName) {
-        var derivers = derivations[specName];
-        if (_.isEmpty(derivers)) return _.identity;
+    function derive() {
+        if (_.isEmpty(options.derived)) return _.identity;
         return function(rows) {
             if (! rows) return;
             rows = _.isArray(rows) ? rows : [rows];
             return _.map(rows, function(row) {
                 row = _.clone(row);
-                _.each(derivers, function(deriverFn, derivedName) {
+                _.each(options.derived, function(deriverFn, derivedName) {
                     row[derivedName] = deriverFn(row);
                 });
                 return row;
@@ -296,198 +160,106 @@ function connect(options) {
         };
     }
 
-    function doSpecUpdate(specName, spec) {
-        var nameParts = specName.split('.');
-        var namespace = (nameParts.length > 1) ? nameParts[0] : null,
-            table = _str.underscored(specName);
-        return db.synchronize(specName, function() {
-            return getSpec(specName)
-            .then(function(savedSpec) {
-                // Even if we checked this before entering this
-                // critical section, do it again to avoid wasted work
-                // when several processes are coming up at the same time.
-                if (_.isEqual(spec, savedSpec)) return;
-
-                return ensureNamespace(namespace)
-                .then(function() {
-                    return db.transaction(function(conn) {
-                        return Promise.all([
-                            conn.execTemplate('__create_entity', {
-                                tableName: table,
-                                columnDefinitions: fieldsToDDL(spec.fields),
-                                refDefinitions: fieldsToDDL(spec.refs, true),
-                                hasId: !!spec.fields.id
-                            }),
-                            saveSpec(specName, spec)
-                        ]);
-                    });
-                });
-            });
-        });
-    }
-
-    var ss = function(specName) {
-        var store = _.mapValues(
-            _.pick(
-                ss,
-                'getByIds', 'getById', 'deleteById', 'deleteByIds',
-                'insert', 'update', 'replace', 'find', 'findOne'),
-            function(fn) { return _.partial(fn, specName); });
-        addDbFns(store);
-        return store;
-    };
-
-    addDbFns(ss, db);
-
-    ss.dropNamespace = function(namespace) {
-        return onSpecs
+    store.insert = function(data) {
+        return onReady
         .then(function() {
-            return Promise.all([
-                // Drop the remembered specs
-                ss.query([
-                    'DELETE FROM dbeasy_store.spec',
-                    'WHERE name LIKE \'' + namespace + '.%\';'
-                ].join('\n')),
-
-                // Erase the data
-                ensureNamespace(namespace)
-                .then(function() {
-                    return ss.query([
-                        'DROP SCHEMA ',
-                        _str.underscored(namespace) + ' CASCADE;'
-                    ].join('\n'));
-                })
-            ]);
-        });
-    };
-
-    ss.addSpec = function(specName, spec) {
-        spec = _.defaults(spec || {}, {
-            fields: {},
-            refs: {},
-            derived: {}
-        });
-
-        var unknownKeys = _.keys(_.omit(spec, 'fields', 'refs', 'derived'));
-        if (unknownKeys.length !== 0) {
-            throw new Error('Malformed spec; unknown keys: ' + unknownKeys);
-        }
-        derivations[specName] = spec.derived;
-        delete spec.derived;
-
-        spec.fields = addDefaultFields(spec.fields, defaultFields);
-
-        onSpecs = onSpecs
-        .then(function() {
-            return getSpec(specName);
-        })
-        .then(function(savedSpec) {
-            if (! _.isEqual(spec, savedSpec)) {
-                return doSpecUpdate(specName, spec);
-            }
-        });
-    };
-
-    ss.insert = function(name, data) {
-        return onSpecs
-        .then(function() {
-            return getWriteContext(name, data, {partial: false});
+            return getWriteContext(data, {partial: false});
         })
         .then(function(ctx) {
-            return ss.execTemplate(
+            return client.execTemplate(
                 '__insert',
                 ctx.templateVars,
                 ctx.inputData
             );
         })
-        .then(_.compose(first, derive(name)));
+        .then(_.compose(first, derive()));
     };
 
-    ss.replace = function(name, whereProps, data) {
-        return ss.update(name, whereProps, data, {partial: false});
+    store.replace = function(whereProps, data) {
+        return store.update(whereProps, data, {partial: false});
     };
 
-    ss.update = function(name, whereProps, data, opts) {
+    store.update = function(whereProps, data, opts) {
         opts = _.defaults(opts || {}, {
             partial: true
         });
         data = _.omit(data, _.keys(defaultFields));
-        return onSpecs
+        return onReady
         .then(function() {
             return addWhereContext(
-                getWriteContext(name, data, opts),
+                getWriteContext(data, opts),
                 whereProps);
         })
         .then(function(ctx) {
-            return ss.execTemplate(
+            return client.execTemplate(
                 '__update',
                 ctx.templateVars,
                 ctx.inputData
             );
         })
-        .then(_.compose(first, derive(name)));
+        .then(_.compose(first, derive()));
     };
 
-    ss.getById = function(name, id) {
-        return onSpecs
+    store.getById = function(id) {
+        return onReady
         .then(function() {
-            return ss.getByIds(name, [id])
+            return store.getByIds([id])
             .then(first);
         });
     };
 
-    ss.deleteById = function(name, id) {
-        return onSpecs
+    store.deleteById = function(id) {
+        return onReady
         .then(function() {
-            return ss.deleteByIds(name, [id]);
+            return store.deleteByIds([id]);
         });
     };
 
-    ss.getByIds = function(name, ids) {
-        return onSpecs
+    store.getByIds = function(ids) {
+        return onReady
         .then(function() {
-            return ss.execTemplate('__get_by_ids', {
-                tableName: _str.underscored(name)
+            return client.execTemplate('__get_by_ids', {
+                tableName: _str.underscored(storeName)
             }, ids)
-            .then(derive(name));
+            .then(derive());
         });
     };
 
-    ss.deleteByIds = function(name, ids) {
-        return onSpecs
+    store.deleteByIds = function(ids) {
+        return onReady
         .then(function() {
-            return ss.execTemplate('__delete_by_ids', {
-                tableName: _str.underscored(name)
+            return client.execTemplate('__delete_by_ids', {
+                tableName: _str.underscored(storeName)
             }, ids);
         });
     };
 
-    ss.find = function(name, opts) {
+    store.find = function(opts) {
         var idx = 1;
         var templateVars = {
             bindVars: {},
             columns: {},
-            tableName: _str.underscored(name)
+            tableName: _str.underscored(storeName)
         };
         templateVars = _.transform(opts, function(result, val, key) {
             result.bindVars[idx] = key;
             result.columns[idx] = _str.underscored(key);
             return result;
         }, templateVars);
-        return onSpecs
+        return onReady
         .then(function() {
-            return ss.execTemplate('__find', templateVars, opts)
-            .then(derive(name));
+            return client.execTemplate('__find', templateVars, opts)
+            .then(derive());
         });
     };
 
-    ss.findOne = function(name, opts) {
-        return ss.find(name, opts)
+    store.findOne = function(opts) {
+        return store.find(opts)
         .then(function(rows) {
             return rows[0] || null;
         });
     };
 
-    return ss;
-}
+    return store;
+};
 

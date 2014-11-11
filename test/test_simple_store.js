@@ -8,42 +8,47 @@ var Promise = require('bluebird'),
     _ = require('lodash'),
     expect = require('chai').expect,
     assert = require('assert'),
-    util = require('./util');
+    util = require('./util'),
+    makeMigrator = require('../migrator');
 
 Promise.longStackTraces();
 
 suite('Store', function() {
 
-  var store;
+  var client;
+  var migrator;
 
 
   setup(function() {
-    return (store
-      ? store.close()
-      : Promise.resolve())
-    .then(function() {
-      store = util.createStore({poolSize: 3});
-      return store.dropNamespace('bigBiz')
-      .catch(_.noop);
-    });
+    if (client) client.close();
+    client = util.createDb({poolSize: 3, enableStore: true});
+    migrator = makeMigrator(client);
+    return migrator.dropNamespace('bigBiz');
   });
 
   test('Operations on a default entity', function() {
-    return store.dropNamespace('foo')
+    var store = null;
+    return migrator.dropNamespace('foo')
     .then(function() {
-      store.addSpec('foo.fooBar');
-      return store.query('SELECT * FROM foo.foo_bar;')
+      return migrator.ensureStore('foo.fooBar')
+      .then(function() {
+        store = client.store('foo.fooBar');
+        return;
+      });
+    })
+    .then(function() {
+      return client.query('SELECT * FROM foo.foo_bar;')
         .then(function(results) {
           expect(results).to.be.empty;
         });
     })
     .then(function() {
-      return store.insert('foo.fooBar', {});
+      return store.insert({});
     })
     .then(function() {
       return Promise.all([
-        store.getById('foo.fooBar', '1'),
-        store.queryRaw('SELECT __deleted, __bag FROM foo.foo_bar WHERE id = \'1\'')
+        store.getById('1'),
+        client.queryRaw('SELECT __deleted, __bag FROM foo.foo_bar WHERE id = \'1\'')
       ]);
     })
     .spread(function(getterResult, queryResult) {
@@ -57,12 +62,12 @@ suite('Store', function() {
       expect(queryResult[0].__bag).to.eql({});
     })
     .then(function() {
-      return store.deleteById('foo.fooBar', '1');
+      return store.deleteById('1');
     })
     .then(function() {
       return Promise.all([
-        store.getById('foo.fooBar', '1'),
-        store.queryRaw('SELECT __deleted FROM foo.foo_bar WHERE id = \'1\'')
+        store.getById('1'),
+        client.queryRaw('SELECT __deleted FROM foo.foo_bar WHERE id = \'1\'')
       ]);
     })
     .spread(function(getterResults, queryResults) {
@@ -73,15 +78,18 @@ suite('Store', function() {
   });
 
   test('Custom fields and data bag', function() {
-    store.addSpec('bigBiz.emp', {
+    var store;
+    return migrator.ensureStore('bigBiz.emp', {
       fields: {
         firstName: 'text NOT NULL',
         deptId: 'bigint'
       }
-    });
-    return store.insert('bigBiz.emp', {
-      creator: {id: '3'},
-      firstName: 'Mel',
+    }).then(function() {
+      store = client.store('bigBiz.emp');
+      return store.insert({
+        creator: {id: '3'},
+        firstName: 'Mel',
+      });
     })
     .then(function(result) {
       expect(result).to.have.property('id', '1');
@@ -89,7 +97,7 @@ suite('Store', function() {
       expect(result).to.not.have.property('dept');
     })
     .then(function() {
-      return store.replace('bigBiz.emp',
+      return store.replace(
         { id: '1' },
         {
           creator: {id: '3'},
@@ -105,7 +113,7 @@ suite('Store', function() {
       expect(result).to.not.have.property('dept');
     })
     .then(function() {
-      return store.update('bigBiz.emp',
+      return store.update(
         { id: '1' },
         {
           deptId: '4',
@@ -121,22 +129,29 @@ suite('Store', function() {
   });
 
   test('Update a spec', function() {
-    store.addSpec('bigBiz.emp', {
+    var store;
+    return migrator.ensureStore('bigBiz.emp', {
       fields: {
         firstName: 'text NOT NULL'
       },
-    });
-    store.addSpec('bigBiz.emp', {
-      fields: {
-        firstName: 'text',
-        deptId: 'bigint'
-      }
-    });
-    return store.insert('bigBiz.emp', {
-      creator: {id: '3'},
-      dept: {id: '2'}
-    }).then(function(emp) {
-      return store.getById('bigBiz.emp', emp.id);
+    })
+    .then(function() {
+      return migrator.ensureStore('bigBiz.emp', {
+        fields: {
+          firstName: 'text',
+          deptId: 'bigint'
+        }
+      });
+    })
+    .then(function() {
+      store = client.store('bigBiz.emp');
+      return store.insert({
+        creator: {id: '3'},
+        dept: {id: '2'}
+      });
+    })
+    .then(function(emp) {
+      return store.getById(emp.id);
     })
     .then(function(result) {
       expect(result).to.not.have.property('firstName');
@@ -147,31 +162,37 @@ suite('Store', function() {
   });
 
   test('Update a spec -- remove field', function() {
-    store.addSpec('bigBiz.emp', {
+    var store;
+    return migrator.ensureStore('bigBiz.emp', {
       fields: {
         firstName: 'text NOT NULL'
       },
-    });
-    store.addSpec('bigBiz.emp', {
-      fields: {
-        firstName: 'text',
-        creatorId: false
-      }
-    });
-    return store.insert('bigBiz.emp', {
-      dept: {id: '2'}
+    })
+    .then(function() {
+      return migrator.ensureStore('bigBiz.emp', {
+        fields: {
+          firstName: 'text',
+          created: false
+        }
+      });
+    })
+    .then(function() {
+      store = client.store('bigBiz.emp');
+      return store.insert({
+        dept: {id: '2'}
+      });
     }).then(function(emp) {
-      return store.getById('bigBiz.emp', emp.id);
+      return store.getById(emp.id);
     })
     .then(function(result) {
-      expect(result).to.not.have.property('creator');
+      expect(result).to.not.have.property('created');
     });
 
   });
 
   test('Catch invalid spec', function() {
     return Promise.try(function() {
-      return store.addSpec('bigBiz.emp', {
+      return migrator.ensureStore('bigBiz.emp', {
         garbage: {
           icky: 'mess'
         },
@@ -185,24 +206,30 @@ suite('Store', function() {
   });
 
   test('Data not lost when spec is equivalent', function() {
-    store.addSpec('bigBiz.emp', {
+    var store;
+    return migrator.ensureStore('bigBiz.emp', {
       fields: {
         firstName: 'text',
         deptId: 'bigint'
       }
-    });
-    return store.insert('bigBiz.emp', {
-      creator: {id: 1},
-      firstName: 'Joe'
     })
     .then(function() {
-      store.addSpec('bigBiz.emp', {
+      store = client.store('bigBiz.emp');
+      return store.insert({
+        creator: {id: 1},
+        firstName: 'Joe'
+      });
+    })
+    .then(function() {
+      return migrator.ensureStore('bigBiz.emp', {
         fields: {
           deptId: 'bigint',
           firstName: 'text'
         },
       });
-      return store.query('SELECT * FROM big_biz.emp;');
+    })
+    .then(function() {
+      return client.query('SELECT * FROM big_biz.emp;');
     })
     .then(function(result) {
       expect(result[0]).to.have.property('firstName', 'Joe');
@@ -210,33 +237,18 @@ suite('Store', function() {
 
   });
 
-  test('Create store via factory', function() {
-    var storeFactory = util.createStoreFactory({poolSize: 3});
-    var store = storeFactory('bigBiz.emp', {
-      fields: {
-        firstName: 'text NOT NULL'
-      }
-    });
-    return store.insert({
-      creator: {id: '3'},
-      firstName: 'Mel',
-    })
-    .then(function(result) {
-      expect(result).to.have.property('firstName', 'Mel');
-    });
-
-  });
-
   test('Use flat references', function() {
-    store.addSpec('bigBiz.emp', {
+    return migrator.ensureStore('bigBiz.emp', {
       fields: {
         firstName: 'text NOT NULL',
         deptId: 'bigint'
       }
-    });
-    return store.insert('bigBiz.emp', {
-      firstName: 'Mel',
-      deptId: '1',
+    })
+    .then(function() {
+      return client.store('bigBiz.emp').insert({
+        firstName: 'Mel',
+        deptId: '1',
+      });
     })
     .then(function(result) {
       expect(result.dept).to.have.property('id', '1');
@@ -244,13 +256,15 @@ suite('Store', function() {
   });
 
   test('Omit default fields', function() {
-    store.addSpec('bigBiz.emp', {
+    return migrator.ensureStore('bigBiz.emp', {
       fields: {
         id: false,
         creatorId: false
       }
-    });
-    return store.insert('bigBiz.emp', {})
+    })
+    .then(function() {
+      return client.store('bigBiz.emp').insert({});
+    })
     .then(function(result) {
       expect(result).to.not.have.property('id');
       expect(result).to.not.have.property('creator');
@@ -258,10 +272,14 @@ suite('Store', function() {
   });
 
   test('findOne()', function() {
-    store.addSpec('bigBiz.emp', {});
-    return store.insert('bigBiz.emp', {})
+    var store;
+    return migrator.ensureStore('bigBiz.emp')
     .then(function() {
-      return store.findOne('bigBiz.emp', {id: '1'});
+      store = client.store('bigBiz.emp');
+      return store.insert({});
+    })
+    .then(function() {
+      return store.findOne({id: '1'});
     })
     .then(function(result) {
       expect(result).to.have.property('id', '1');
@@ -269,27 +287,32 @@ suite('Store', function() {
   });
 
   test('Derived field', function() {
-    store.addSpec('bigBiz.emp', {
+    var store;
+    return migrator.ensureStore('bigBiz.emp', {
       fields: {
         firstName: 'text',
         lastName: 'text',
         creatorId: false
-      },
-      derived: {
-        name: function(record) {
-          return record.firstName + ' ' + record.lastName;
-        }
       }
-    });
-    return store.insert('bigBiz.emp', {
-      // http://en.wikipedia.org/wiki/Mel_Blanc
-      firstName: 'Mel',
-      lastName: 'Blank',
-      name: 'ignored'
+    })
+    .then(function() {
+      store = client.store('bigBiz.emp', {
+        derived: {
+          name: function(record) {
+            return record.firstName + ' ' + record.lastName;
+          }
+        }
+      });
+      return store.insert({
+        // http://en.wikipedia.org/wiki/Mel_Blanc
+        firstName: 'Mel',
+        lastName: 'Blank',
+        name: 'ignored'
+      });
     })
     .then(function(result) {
       expect(result).to.have.property('name', 'Mel Blank');
-      return store.queryRaw('SELECT * FROM big_biz.emp WHERE id=$1', result.id)
+      return client.queryRaw('SELECT * FROM big_biz.emp WHERE id=$1', result.id)
       .then(_.first);
     })
     .then(function(result) {

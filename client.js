@@ -1,6 +1,7 @@
 "use strict";
 
 var pg = require('pg').native,
+    path = require('path'),
     assert = require('assert'),
     _ = require('lodash'),
     _str = require('underscore.string'),
@@ -8,7 +9,9 @@ var pg = require('pg').native,
     fs = Promise.promisifyAll(require('fs')),
     handlebars = require('handlebars'),
     crypto = require('crypto'),
-    util = require('./util');
+    util = require('./util'),
+    makePool = require('./pool'),
+    makeStore = require('./store').store;
 
 
 function loadQuery(loadpath, fileName) {
@@ -46,28 +49,20 @@ function hashCode(str) {
   return hash;
 }
 
-exports.envToConfig = function(prefix) {
-    var pgconf = {};
-    _.each(['host', 'user', 'port', 'password', 'database'], function(key) {
-        var envKey = prefix + key.toUpperCase();
-        if (!process.env[envKey]) return;
-        pgconf[key] = process.env[envKey];
-    });
-    return pgconf;
-};
-
 exports.encodeArray = function(arr, conformer) {
     return '{' + _.map(arr, conformer).join(',') + '}';
 };
 
-module.exports = function client(pool, options) {
-    if (!pool) {
-        throw new TypeError('Expectd a connection pool as first argument');
-    }
+module.exports = function client(options) {
 
     options = _.defaults(options || {}, {
-        debug: false
+        debug: false,
+        egress: null,
+        pool: null,
+        enableStore: false
     });
+
+    var pool = options.pool || makePool(_.pick(options, 'poolSize', 'url'));
     var logger = options.logger || {
         debug: function() {
             if (options.debug) console.log.apply(console, arguments);
@@ -77,17 +72,26 @@ module.exports = function client(pool, options) {
         error: console.error,
     };
 
-    var db = {};
-    db._logger = logger;
-    db.__prepared = {};
-    db.__templates = {};
-    db.__loadpath = options.loadpath || "";
+    var client = {};
+    client._logger = logger;
+    client.__prepared = {};
+    client.__templates = {};
+    client.__loadpath = options.loadpath || "";
 
     var egress = options.egress
-        ? function(rows) {
-            return _.map(rows, options.egress);
-        }
-        : function(rows) { return rows; };
+        ? _.compose.apply(null, options.egress)
+        : _.identity;
+
+    egress = options.enableStore
+        ? _.compose(
+            egress,
+            util.jsifyColumns,
+            util.handleMetaColumns)
+        : egress;
+
+    function egressAll(rows) {
+        return _.map(rows, egress);
+    }
 
     pg = Promise.promisifyAll(pg);
 
@@ -111,7 +115,7 @@ module.exports = function client(pool, options) {
     Connection.prototype.query = function(text, vals) {
         return this.queryRaw(text, vals)
         .then(function(results) {
-            return results ? egress(results) : null;
+            return results ? egressAll(results) : null;
         });
     };
 
@@ -123,6 +127,11 @@ module.exports = function client(pool, options) {
             var statement = statements.shift();
             if (!statement) return results.pop();
 
+            logger.debug([
+                '>>>> DBEasy query ',
+                JSON.stringify({vals: vals || []}),
+                text,
+                '<<<<'].join('\n'));
             return self.pgConnection.query(text, vals)
                 .then(function(result) {
                     results.push(result.rows ? result.rows : null);
@@ -143,11 +152,11 @@ module.exports = function client(pool, options) {
         md5sum.update(key);
         key = md5sum.digest('hex');
 
-        if (db.__prepared[key]) {
+        if (client.__prepared[key]) {
             return this.exec(key, values);
         }
 
-        var template = db.__templates[templateKey];
+        var template = client.__templates[templateKey];
         if (! template) {
             throw error("template not found: " + templateKey);
         }
@@ -159,7 +168,7 @@ module.exports = function client(pool, options) {
     Connection.prototype.exec = function(key, values) {
         var self = this;
         if (values !== undefined) { values = _.rest(arguments); }
-        var prepared = db.__prepared[key];
+        var prepared = client.__prepared[key];
         if (! prepared) {
             throw error("prepared statement not found: " + key);
         }
@@ -196,7 +205,7 @@ module.exports = function client(pool, options) {
                 opts.text,
                 '<<<<'].join('\n'));
             return self.pgConnection.query(opts).then(function(result) {
-                results.push(result.rows ? egress(result.rows) : null);
+                results.push(result.rows ? egressAll(result.rows) : null);
                 return next(results);
             })
             .catch(function(err) {
@@ -239,39 +248,39 @@ module.exports = function client(pool, options) {
     };
 
     // set the load path
-    db.loadpath = function(path) {
-        db.__loadpath = path;
+    client.loadpath = function(path) {
+        client.__loadpath = path;
     };
 
 
     // Execute a previously prepared statement
-    db.exec = function(/*statement, params*/) {
+    client.exec = function(/*statement, params*/) {
         var args = _.toArray(arguments);
-        return db.useConnection(function(conn) {
+        return client.useConnection(function(conn) {
             return conn.exec.apply(conn, args);
         });
     };
 
-    db.execTemplate = function(/*statement, templateParams, params*/) {
+    client.execTemplate = function(/*statement, templateParams, params*/) {
         var args = _.toArray(arguments);
-        return db.useConnection(function(conn) {
+        return client.useConnection(function(conn) {
             return conn.execTemplate.apply(conn, args);
         });
     };
 
     // Execute a sql query string
-    db.query = function(sql /*, params*/) {
+    client.query = function(sql /*, params*/) {
         var args = _.toArray(arguments);
-        return db.useConnection( function(conn) {
+        return client.useConnection( function(conn) {
             return conn.query.apply(sql, args);
         });
     };
 
     // Execute a sql query string and don't run
     // the results through egress
-    db.queryRaw = function(sql /*, params*/) {
+    client.queryRaw = function(sql /*, params*/) {
         var args = _.toArray(arguments);
-        return db.useConnection( function(conn) {
+        return client.useConnection( function(conn) {
             return conn.queryRaw.apply(sql, args);
         });
     };
@@ -290,7 +299,7 @@ module.exports = function client(pool, options) {
     // multiple statements to be executed within a single transaction.
     // Generally try to avoid this.  You must understand locking
     // (and deadlocking) in postgres before using this.
-    db.transaction = function(workFn) {
+    client.transaction = function(workFn) {
         return useConnection( function(conn) {
             conn.begin();
             var working = workFn(conn);
@@ -302,7 +311,7 @@ module.exports = function client(pool, options) {
         });
     };
 
-    db.synchronize = function(lockName, workFn) {
+    client.synchronize = function(lockName, workFn) {
         var lockNum = hashCode(lockName);
         return useConnection( function(conn) {
             return conn.query(
@@ -328,14 +337,14 @@ module.exports = function client(pool, options) {
     // NOTE: You shouldn't really need to use this.  This is
     // only necessary if you need fine grain control over
     // transactions.
-    db.useConnection = function(workFn) {
+    client.useConnection = function(workFn) {
         return useConnection( function(conn) {
             return workFn(conn);
         });
     };
 
-    db.prepareTemplate = function(key, templateFile, context, types) {
-        var reading = loadQuery(db.__loadpath, templateFile);
+    client.prepareTemplate = function(key, templateFile, context, types) {
+        var reading = loadQuery(client.__loadpath, templateFile);
 
         var templating = reading.then(function(templateBody) {
             var template = handlebars.compile(templateBody);
@@ -345,7 +354,7 @@ module.exports = function client(pool, options) {
         });
 
         var stashing = templating.then(function(text) {
-            db.__prepared[key] = {
+            client.__prepared[key] = {
                 name: key,
                 text: text,
                 types: types
@@ -360,13 +369,13 @@ module.exports = function client(pool, options) {
     function compileTemplate(key, path, fname) {
         return loadQuery(path, fname)
         .then(function(text) {
-            db.__templates[key] = handlebars.compile(text);
+            client.__templates[key] = handlebars.compile(text);
         });
     }
 
     function prepare(key, types, text, path, fname) {
         var stash = function(text, namedParams) {
-            db.__prepared[key] = {
+            client.__prepared[key] = {
                 name: key,
                 text: text,
                 types: types,
@@ -389,7 +398,7 @@ module.exports = function client(pool, options) {
         return reading;
     }
 
-    db.prepare = function() {
+    client.prepare = function() {
         var key, text, types, path, fname;
         assert(arguments.length <= 3);
         key = arguments[0];
@@ -401,7 +410,7 @@ module.exports = function client(pool, options) {
         }
         if (text) return prepare(key, types, text);
 
-        path = db.__loadpath;
+        path = client.__loadpath;
         if (key.slice(-8) === '.sql.hbs') {
             fname = key;
             key = key.slice(0, -8);
@@ -417,7 +426,7 @@ module.exports = function client(pool, options) {
         return prepare(key, types, text, path, fname);
     };
 
-    db.prepareDir = function(path) {
+    client.prepareDir = function(path) {
         return fs.readdirAsync(path)
         .then(function(files) {
             var sqlFiles = _.filter(files, function(file) {
@@ -438,15 +447,15 @@ module.exports = function client(pool, options) {
         });
     };
 
-    db.prepareAll = function(/* statements */) {
+    client.prepareAll = function(/* statements */) {
         return Promise.all(
             _.map(arguments, function(arg) {
                 if (_.isString(arg)) {
-                    return db.prepare(arg);
+                    return client.prepare(arg);
                 }
                 //arrays are used to pass through statement name
                 //as well as argument types
-                return db.prepare.apply(null, arg);
+                return client.prepare.apply(null, arg);
             })
         ).then( function(results) {
             _.each(results, function(r) {
@@ -456,7 +465,7 @@ module.exports = function client(pool, options) {
         });
     };
 
-    db.close = function() {
+    client.close = function() {
         _.each(pg.pools.all, function(pool, key) {
             pool.drain(function() {
                 pool.destroyAllNow();
@@ -465,13 +474,21 @@ module.exports = function client(pool, options) {
         });
     };
 
-    db.cleansedConfig = function() {
+    client.cleansedConfig = function() {
         return _.omit(options, "password", "logger", "egress");
     };
 
-    db.store = function(specName) {
-        
+    client.store = function(specName, storeOptions) {
+        assert(
+            options.enableStore,
+            'store not availble: create client with {enableStore: true}');
+        return makeStore(client, specName, storeOptions);
     };
 
-    return db;
+    var onSqlPrepared = null;
+    client.__prepareSql = function() {
+        return onSqlPrepared || client.prepareDir(path.join(__dirname, 'sql'));
+    };
+
+    return client;
 };

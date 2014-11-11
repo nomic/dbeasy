@@ -172,7 +172,7 @@ suite("Client", function() {
     });
 
     test("prepare a statement", function(done) {
-        db = createDb({}, {loadpath: __dirname, poolSize:10});
+        db = createDb({loadpath: __dirname, poolSize:10});
 
         var preparing = db.prepare('test_query');
 
@@ -191,7 +191,7 @@ suite("Client", function() {
     });
 
     test("prepare all statements in a directory", function(done) {
-        db = createDb({}, {loadpath: __dirname, poolSize:10});
+        db = createDb({loadpath: __dirname, poolSize:10});
 
         db.prepareDir(__dirname + '/test_sql')
         .then(function() { return db.exec('select_1'); })
@@ -215,7 +215,7 @@ suite("Client", function() {
     });
 
     test("prepare statemnt with named args", function(done) {
-        db = createDb({}, {loadpath: __dirname, poolSize:10});
+        db = createDb({loadpath: __dirname, poolSize:10});
 
         db.prepare('select_named_args')
         .then(function() {
@@ -232,7 +232,7 @@ suite("Client", function() {
     });
 
     test("prepare a statement from a template", function(done) {
-        db = createDb({}, {loadpath: __dirname, poolSize:10});
+        db = createDb({loadpath: __dirname, poolSize:10});
 
         var preparing = db.prepareTemplate('descending', 'test_query_template.sql.hbs', {direction: 'DESC'});
 
@@ -254,7 +254,7 @@ suite("Client", function() {
 
 
     test("db.execTemplate", function(done) {
-        db = createDb({}, {loadpath: __dirname, poolSize:10});
+        db = createDb({loadpath: __dirname, poolSize:10});
 
         var preparing = db.prepare('test_query_template.sql.hbs');
 
@@ -276,7 +276,7 @@ suite("Client", function() {
 
     test("db.exec: write then read consistency", function(done) {
 
-        db = createDb({}, {loadpath: __dirname, poolSize:10});
+        db = createDb({loadpath: __dirname, poolSize:10});
         var counter = 0;
 
         db.prepare('update_stmt', 'UPDATE fooid SET bar = bar+1 WHERE id = 0;');
