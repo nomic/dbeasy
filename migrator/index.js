@@ -40,7 +40,8 @@ module.exports = function(client) {
     return client.exec('__clear_migrations');
   }
 
-  migrator.collector = function() {
+  migrator.collector = collector;
+  function collector() {
     var prevMigrationDate;
     return function migration(isoDateStr, description) {
       var date = new Date(isoDateStr);
@@ -80,9 +81,10 @@ module.exports = function(client) {
 
       return api;
     };
-  };
+  }
 
-  migrator.runPending = function() {
+  migrator.runPending = runPending;
+  function runPending() {
     return Promise.reduce(migrations, function(__, migration) {
       return Promise.reduce(migration.tasks, function(__, task) {
         return task();
@@ -95,7 +97,7 @@ module.exports = function(client) {
       migrations = [];
       return loadLastMigrationDate();
     });
-  };
+  }
 
   return onReady.then(function() {
     return migrator;
