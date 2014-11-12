@@ -1,12 +1,5 @@
-DROP TABLE IF EXISTS {{tableName}} CASCADE;
-DROP SEQUENCE IF EXISTS {{tableName}}_id_seq CASCADE;
-
 CREATE TABLE {{tableName}} (
-  {{#each columnDefinitions}}
-  {{this}},{{/each}}
-  -- system fields
-  __bag json NOT NULL DEFAULT '{}',
-  __deleted timestamp without time zone
+  {{{columnDefinitions}}}
 );
 
 {{#if hasId}}

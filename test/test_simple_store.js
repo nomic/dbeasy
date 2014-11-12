@@ -9,28 +9,28 @@ var Promise = require('bluebird'),
     expect = require('chai').expect,
     assert = require('assert'),
     util = require('./util'),
-    makeMigrator = require('../migrator');
+    layoutModule = require('../layout');
 
 Promise.longStackTraces();
 
 suite('Store', function() {
 
   var client;
-  var migrator;
+  var layout;
 
 
   setup(function() {
     if (client) client.close();
     client = util.createDb({poolSize: 3, enableStore: true});
-    migrator = makeMigrator(client);
-    return migrator.dropNamespace('bigBiz');
+    layout = layoutModule(client);
+    return layout.dropNamespace('bigBiz');
   });
 
   test('Operations on a default entity', function() {
     var store = null;
-    return migrator.dropNamespace('foo')
+    return layout.dropNamespace('foo')
     .then(function() {
-      return migrator.ensureStore('foo.fooBar')
+      return layout.addStore('foo.fooBar')
       .then(function() {
         store = client.store('foo.fooBar');
         return;
@@ -79,8 +79,8 @@ suite('Store', function() {
 
   test('Custom fields and data bag', function() {
     var store;
-    return migrator.ensureStore('bigBiz.emp', {
-      fields: {
+    return layout.addStore('bigBiz.emp', {
+      columns: {
         firstName: 'text NOT NULL',
         deptId: 'bigint'
       }
@@ -128,71 +128,28 @@ suite('Store', function() {
 
   });
 
-  test('Update a spec', function() {
-    var store;
-    return migrator.ensureStore('bigBiz.emp', {
-      fields: {
+  test('Adding a store twice ends in error', function() {
+    return layout.addStore('bigBiz.emp', {
+      columns: {
         firstName: 'text NOT NULL'
       },
     })
     .then(function() {
-      return migrator.ensureStore('bigBiz.emp', {
-        fields: {
+      return layout.addStore('bigBiz.emp', {
+        columns: {
           firstName: 'text',
           deptId: 'bigint'
         }
       });
     })
     .then(function() {
-      store = client.store('bigBiz.emp');
-      return store.insert({
-        creator: {id: '3'},
-        dept: {id: '2'}
-      });
-    })
-    .then(function(emp) {
-      return store.getById(emp.id);
-    })
-    .then(function(result) {
-      expect(result).to.not.have.property('firstName');
-      expect(result).to.have.property('dept');
-      expect(result.dept).to.eql({id: '2'});
-    });
-
-  });
-
-  test('Update a spec -- remove field', function() {
-    var store;
-    return migrator.ensureStore('bigBiz.emp', {
-      fields: {
-        firstName: 'text NOT NULL'
-      },
-    })
-    .then(function() {
-      return migrator.ensureStore('bigBiz.emp', {
-        fields: {
-          firstName: 'text',
-          created: false
-        }
-      });
-    })
-    .then(function() {
-      store = client.store('bigBiz.emp');
-      return store.insert({
-        dept: {id: '2'}
-      });
-    }).then(function(emp) {
-      return store.getById(emp.id);
-    })
-    .then(function(result) {
-      expect(result).to.not.have.property('created');
-    });
-
+      throw new Error("Expected failure on second addStore()");
+    }, _.noop);
   });
 
   test('Catch invalid spec', function() {
     return Promise.try(function() {
-      return migrator.ensureStore('bigBiz.emp', {
+      return layout.addStore('bigBiz.emp', {
         garbage: {
           icky: 'mess'
         },
@@ -205,41 +162,9 @@ suite('Store', function() {
 
   });
 
-  test('Data not lost when spec is equivalent', function() {
-    var store;
-    return migrator.ensureStore('bigBiz.emp', {
-      fields: {
-        firstName: 'text',
-        deptId: 'bigint'
-      }
-    })
-    .then(function() {
-      store = client.store('bigBiz.emp');
-      return store.insert({
-        creator: {id: 1},
-        firstName: 'Joe'
-      });
-    })
-    .then(function() {
-      return migrator.ensureStore('bigBiz.emp', {
-        fields: {
-          deptId: 'bigint',
-          firstName: 'text'
-        },
-      });
-    })
-    .then(function() {
-      return client.query('SELECT * FROM big_biz.emp;');
-    })
-    .then(function(result) {
-      expect(result[0]).to.have.property('firstName', 'Joe');
-    });
-
-  });
-
   test('Use flat references', function() {
-    return migrator.ensureStore('bigBiz.emp', {
-      fields: {
+    return layout.addStore('bigBiz.emp', {
+      columns: {
         firstName: 'text NOT NULL',
         deptId: 'bigint'
       }
@@ -256,8 +181,8 @@ suite('Store', function() {
   });
 
   test('Omit default fields', function() {
-    return migrator.ensureStore('bigBiz.emp', {
-      fields: {
+    return layout.addStore('bigBiz.emp', {
+      columns: {
         id: false,
         creatorId: false
       }
@@ -273,7 +198,7 @@ suite('Store', function() {
 
   test('findOne()', function() {
     var store;
-    return migrator.ensureStore('bigBiz.emp')
+    return layout.addStore('bigBiz.emp')
     .then(function() {
       store = client.store('bigBiz.emp');
       return store.insert({});
@@ -288,8 +213,8 @@ suite('Store', function() {
 
   test('Derived field', function() {
     var store;
-    return migrator.ensureStore('bigBiz.emp', {
-      fields: {
+    return layout.addStore('bigBiz.emp', {
+      columns: {
         firstName: 'text',
         lastName: 'text',
         creatorId: false

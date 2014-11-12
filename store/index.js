@@ -2,39 +2,33 @@
 var _ = require('lodash'),
     _str = require('underscore.string'),
     assert = require('assert'),
-    util = require('./util'),
+    util = require('../util'),
     SYS_COL_PREFIX = util.SYS_COL_PREFIX,
     BAG_COL = util.BAG_COL;
 
 var defaultFields = {
-    id: 'bigint NOT NULL',
+    id:      'bigint NOT NULL',
     created: 'timestamp without time zone DEFAULT now() NOT NULL',
     updated: 'timestamp without time zone DEFAULT now() NOT NULL',
 };
 
+var metaFields = {
+    __bag:     'json NOT NULL DEFAULT \'{}\'',
+    __deleted: 'timestamp without time zone'
+};
+
 var neverUpdated = _.keys(defaultFields);
 exports.defaultFields = defaultFields;
-
+exports.metaFields = metaFields;
 
 exports.store = function(client, storeName, options) {
     options = _.defaults(options || {}, {
         derived: {}
     });
+    var layout = require('../layout')(client);
 
-    var onReady = client.__prepareSql();
+    var onReady = client.prepareDir(__dirname + '/sql');
     var store = {};
-
-    function getColumnInfo(tableName) {
-        var parts = tableName.split('.');
-        return client.exec('__get_table_info', {
-            schemaName: parts[0],
-            tableName: parts[1]
-        })
-        .then(function(cols) {
-            if (!cols[0]) throw new Error('Unkown store table: ' + tableName);
-            return cols;
-        });
-    }
 
     function getWriteContext(data, opts) {
         var isPartialUpdate = opts.partial || false;
@@ -44,7 +38,7 @@ exports.store = function(client, storeName, options) {
         // Do not save derived values.
         data = _.omit(data, _.keys(options.derived));
 
-        return getColumnInfo(tableName)
+        return layout.getColumnInfo(tableName)
         .then(function(cols) {
             cols = _.reject(cols, function(col) {
                 return (

@@ -49,11 +49,19 @@ function hashCode(str) {
   return hash;
 }
 
-exports.encodeArray = function(arr, conformer) {
-    return '{' + _.map(arr, conformer).join(',') + '}';
-};
+client.parseNamedParams = parseNamedParams;
+function parseNamedParams(text) {
+    var paramsRegex = /\$([0-9]+):\ *([a-zA-Z_\.\$]+)/mg,
+        matches,
+        params = [];
+    while (matches = paramsRegex.exec(text)) {
+        params[parseInt(matches[1], 10) - 1] = matches[2];
+    }
+    return params;
+}
 
-module.exports = function client(options) {
+module.exports = client;
+function client(options) {
 
     options = _.defaults(options || {}, {
         debug: false,
@@ -383,12 +391,12 @@ module.exports = function client(options) {
             };
         };
         if (text) {
-            stash(text, util.parseNamedParams(text));
+            stash(text, parseNamedParams(text));
             return Promise.resolve(key);
         }
         var reading = loadQuery(path, fname)
         .then(function(text) {
-            stash(text, util.parseNamedParams(text));
+            stash(text, parseNamedParams(text));
         })
         .then(function() {
             return key;

@@ -209,7 +209,7 @@ suite("Client", function() {
             "--"
         );
 
-        var actual = require('../util').parseNamedParams(text);
+        var actual = client.parseNamedParams(text);
         assert.equal(actual[0], 'foo');
         assert.equal(actual[1], 'bar');
     });

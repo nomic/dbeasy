@@ -32,14 +32,3 @@ function handleMetaColumns(row) {
         return result;
     }, {});
 }
-
-exports.parseNamedParams = parseNamedParams;
-function parseNamedParams(text) {
-    var paramsRegex = /\$([0-9]+):\ *([a-zA-Z_\.\$]+)/mg,
-        matches,
-        params = [];
-    while (matches = paramsRegex.exec(text)) {
-        params[parseInt(matches[1], 10) - 1] = matches[2];
-    }
-    return params;
-}

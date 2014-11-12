@@ -1,6 +1,6 @@
 --
--- $1: schemaName
--- $2: tableName
+-- $1: schema
+-- $2: table
 --
 SELECT *
   FROM information_schema.columns
