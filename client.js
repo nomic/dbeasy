@@ -49,7 +49,7 @@ function hashCode(str) {
   return hash;
 }
 
-client.parseNamedParams = parseNamedParams;
+clientFn.parseNamedParams = parseNamedParams;
 function parseNamedParams(text) {
     var paramsRegex = /\$([0-9]+):\ *([a-zA-Z_\.\$]+)/mg,
         matches,
@@ -60,8 +60,8 @@ function parseNamedParams(text) {
     return params;
 }
 
-module.exports = client;
-function client(options) {
+module.exports = clientFn;
+function clientFn(options) {
 
     options = _.defaults(options || {}, {
         debug: false,
@@ -71,14 +71,18 @@ function client(options) {
     });
 
     var pool = options.pool || makePool(_.pick(options, 'poolSize', 'url'));
-    var logger = options.logger || {
-        debug: function() {
-            if (options.debug) console.log.apply(console, arguments);
-        },
-        info: console.log,
-        warn: console.log,
-        error: console.error,
-    };
+    var logger = (options.logger === 'console')
+      ? {
+            debug: function() {
+                console.log.apply(console, arguments);
+            },
+            info: console.log,
+            warn: console.log,
+            error: console.error
+        }
+      : options.logger
+        ? options.logger
+        : {debug: _.noop, info: _.noop, warm: _.noop, error: _.noop};
 
     var client = {};
     client._logger = logger;
@@ -499,4 +503,5 @@ function client(options) {
     };
 
     return client;
-};
+}
+

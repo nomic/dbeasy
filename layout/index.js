@@ -79,8 +79,8 @@ module.exports = function(client) {
     });
   }
 
-  expose(ensureTable);
-  function ensureTable(specName, spec) {
+  expose(tableExists);
+  function tableExists(specName, spec) {
     var tableName = _str.underscored(specName);
     var parts = tableName.split('.');
     return client.exec('__get_table_info', {
@@ -88,7 +88,14 @@ module.exports = function(client) {
       table: parts[1]
     })
     .then(function(results) {
-      var exists = !!results.length;
+      return !!results.length;
+    });
+  }
+
+  expose(ensureTable);
+  function ensureTable(specName, spec) {
+    return tableExists(specName, spec)
+    .then(function(exists) {
       if (!exists) {
         return addTable(specName, spec);
       }

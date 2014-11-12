@@ -7,43 +7,63 @@ module.exports = function(client) {
 
   var migrator = {};
   var layout = layoutModule(client);
-  var migrations = [];
-  var lastRunMigrationDate = null;
+  var migrations = {};
+  var onReady = client.prepareDir(__dirname + '/sql');
 
-  function loadLastMigrationDate() {
-    return layout.ensureTable('dbeasy.migration', {
+
+  function ensureMigrationTable(setName) {
+    return layout.ensureTable(setName + '.migration', {
       columns: {
         date: 'timestamp without time zone NOT NULL',
-        description: 'text NOT NULL'
-      }
-    })
+        description: 'text NOT NULL',
+        completed: 'timestamp without time zone DEFAULT now() NOT NULL',
+      }});
+  }
+
+  function loadLastMigrationDate(setName) {
+    return ensureMigrationTable(setName)
     .then(function() {
-      return client.exec('__get_last_migration');
+      return client.execTemplate(
+        '__get_last_migration',
+        {setName: setName});
     })
     .then(function(result) {
-      lastRunMigrationDate = result.length && result[0].date;
+      return result.length && result[0].date;
     });
   }
 
-  var onReady = client.prepareDir(__dirname + '/sql')
-  .then(function() {
-    return loadLastMigrationDate();
-  });
-
   function recordMigration(migration) {
-    return client.exec('__record_migration', migration);
+    return client.execTemplate(
+      '__record_migration',
+      {setName: migration.setName},
+      migration);
+  }
+
+  function migrationTableExists(setName) {
+    return layout.tableExists(setName + '.migration');
   }
 
   migrator.clearMigrations = clearMigrations;
-  function clearMigrations() {
-    lastRunMigrationDate = null;
-    return client.exec('__clear_migrations');
+  function clearMigrations(setName) {
+    return onReady
+    .then(function() { return migrationTableExists(setName); })
+    .then(function(exists) {
+      if (exists) {
+        return client.execTemplate('__clear_migrations', {setName: setName});
+      }
+    });
   }
 
   migrator.collector = collector;
-  function collector() {
+  function collector(setName) {
+    if (! _.isString(setName)) {
+      throw new TypeError('Expected a string name identifying the migration set');
+    }
+    var setMigrations = [];
+    migrations[setName] = setMigrations;
     var prevMigrationDate;
-    return function migration(isoDateStr, description) {
+
+    function migration(isoDateStr, description) {
       var date = new Date(isoDateStr);
       if (isNaN(date.getTime())) {
         throw new Error(
@@ -63,6 +83,7 @@ module.exports = function(client) {
 
       var api = {};
       var migration_ = {
+        setName: setName,
         date: date,
         description: description || 'unnamed',
         tasks: []
@@ -73,35 +94,58 @@ module.exports = function(client) {
         });
         return api;
       };
-      if (lastRunMigrationDate >= date) {
-        return api;
-      }
 
-      migrations.push(migration_);
+      setMigrations.push(migration_);
 
       return api;
-    };
+    }
+
+    return migration;
   }
 
-  migrator.runPending = runPending;
-  function runPending() {
-    return Promise.reduce(migrations, function(__, migration) {
-      return Promise.reduce(migration.tasks, function(__, task) {
-        return task();
-      }, null)
-      .then(function() {
-        return recordMigration(migration);
-      });
-    }, null)
-    .then(function() {
-      migrations = [];
-      return loadLastMigrationDate();
+  function getPendingMigrations() {
+    return Promise.all(_.transform(
+      migrations,
+      function(results, setMigrations, setName) {
+        results.push(
+          loadLastMigrationDate(setName)
+          .then(function(lastDate) {
+            return _.filter(setMigrations, function(migration) {
+              return (!lastDate || (migration.date > lastDate));
+            });
+          }));
+        return results;
+      }, []))
+    .then(function(resultsBySet) {
+      return _.sortBy(_.flatten(resultsBySet), 'date');
     });
   }
 
-  return onReady.then(function() {
-    return migrator;
-  });
+  migrator.up = migrator.runPending = runPending;
+  function runPending() {
+    return onReady.then(function() {
+      return getPendingMigrations();
+    })
+    .then(function(pendingMigrations) {
+      if (!pendingMigrations.length) {
+        client._logger.info('No pending migrations');
+        return;
+      }
+      return Promise.reduce(pendingMigrations, function(__, migration) {
+        client._logger.info(
+          'Running migration',
+          _.pick(migration, 'date', 'description'));
+        return Promise.reduce(migration.tasks, function(__, task) {
+          return task();
+        }, null)
+        .then(function() {
+          return recordMigration(migration);
+        });
+      }, null);
+    });
+  }
+
+  return migrator;
 
 };
 

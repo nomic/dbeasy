@@ -23,14 +23,11 @@ suite('Migration', function() {
   setup(function() {
     if (client) client.close();
     client = util.createDb({poolSize: 3, enableStore: true});
-    return makeMigrator(client)
-    .then(function(migrator_) {
-      migrator = migrator_;
-      return migrator.clearMigrations()
-      .then(function() {
-        migration = migrator.collector();
-        return layout(client).dropNamespace('school');
-      });
+    migrator = makeMigrator(client);
+    return migrator.clearMigrations('school')
+    .then(function() {
+      migration = migrator.collector('school');
+      return layout(client).dropNamespace('school');
     });
   });
 
@@ -106,7 +103,7 @@ suite('Migration', function() {
       return migrator.runPending();
     })
     .then(function() {
-      migration = migrator.collector();
+      migration = migrator.collector('school');
       migration('2014-11-11T01:24', 'Create classroom')
       .addStore('school.classroom');
       return migrator.runPending();
