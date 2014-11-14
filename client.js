@@ -192,10 +192,6 @@ function clientFn(options) {
             var namedValues = values[0];
             values = _.map(prepared.namedParams, function(paramName) {
                 var val = getKeyPath(namedValues, paramName);
-                if (!val && _str.endsWith(paramName, 'Id')) {
-                    paramName = paramName.slice(0,-2) + '.id';
-                    val = getKeyPath(namedValues, paramName.clice);
-                }
                 return val;
             });
         }
