@@ -97,7 +97,8 @@ function clientFn(options) {
     egress = options.enableStore
         ? _.compose(
             egress,
-            util.jsifyColumns,
+            util.removeNulls,
+            util.camelizeColumns,
             util.handleMetaColumns)
         : egress;
 

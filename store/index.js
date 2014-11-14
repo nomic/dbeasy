@@ -61,13 +61,6 @@ exports.store = function(client, storeName, options) {
 
                 var fieldName = _str.camelize(colName),
                     val = data[fieldName];
-                if (!val && fieldName.slice(-2) === 'Id') {
-                    //check for nested id
-                    var objField = fieldName.slice(0,-2);
-                    placed.push(objField);
-                    val = data[objField];
-                    val = val && val.id;
-                }
 
                 if (!val && isPartialUpdate) {
                     return;

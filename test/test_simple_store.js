@@ -87,7 +87,6 @@ suite('Store', function() {
     }).then(function() {
       store = client.store('bigBiz.emp');
       return store.insert({
-        creator: {id: '3'},
         firstName: 'Mel',
       });
     })
@@ -100,7 +99,6 @@ suite('Store', function() {
       return store.replace(
         { id: '1' },
         {
-          creator: {id: '3'},
           firstName: 'Melly',
           interests: {favoriteSandwich: 'Falafel'},
         });
@@ -121,7 +119,7 @@ suite('Store', function() {
     })
     .then(function(result) {
       expect(result).to.have.property('firstName', 'Melly');
-      expect(result.dept).to.have.property('id', '4');
+      expect(result).to.have.property('deptId', '4');
       assert(result.updated > result.created,
         'expected updated to be greater than created');
     });
@@ -162,29 +160,10 @@ suite('Store', function() {
 
   });
 
-  test('Use flat references', function() {
-    return layout.addStore('bigBiz.emp', {
-      columns: {
-        firstName: 'text NOT NULL',
-        deptId: 'bigint'
-      }
-    })
-    .then(function() {
-      return client.store('bigBiz.emp').insert({
-        firstName: 'Mel',
-        deptId: '1',
-      });
-    })
-    .then(function(result) {
-      expect(result.dept).to.have.property('id', '1');
-    });
-  });
-
   test('Omit default fields', function() {
     return layout.addStore('bigBiz.emp', {
       columns: {
         id: false,
-        creatorId: false
       }
     })
     .then(function() {
@@ -192,7 +171,6 @@ suite('Store', function() {
     })
     .then(function(result) {
       expect(result).to.not.have.property('id');
-      expect(result).to.not.have.property('creator');
     });
   });
 
@@ -217,7 +195,6 @@ suite('Store', function() {
       columns: {
         firstName: 'text',
         lastName: 'text',
-        creatorId: false
       }
     })
     .then(function() {
