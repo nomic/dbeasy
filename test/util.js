@@ -4,11 +4,11 @@ var _ = require('lodash'),
 
 
 var pgconf = {
-    url: process.env.POSTGRES_URL,
-    poolSize: 5
+  url: process.env.POSTGRES_URL,
+  poolSize: 5
 };
 
 exports.createDb = createDb;
 function createDb(testOpts) {
-    return dbeasy.client(_.extend(_.clone(pgconf), testOpts));
+  return dbeasy.client(_.extend(_.clone(pgconf), testOpts));
 }
