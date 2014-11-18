@@ -8,7 +8,12 @@ module.exports = function(client) {
   var migrator = {};
   var layout = layoutModule(client);
   var migrations = {};
-  var onReady = client.prepareDir(__dirname + '/sql');
+
+  var statements;
+  var onReady = client.loadStatements(__dirname + '/sql')
+  .then(function(stmts) {
+    statements = stmts;
+  });
 
 
   function ensureMigrationTable(setName) {
@@ -24,7 +29,7 @@ module.exports = function(client) {
     return ensureMigrationTable(setName)
     .then(function() {
       return client.execTemplate(
-        '__get_last_migration',
+        statements.getLastMigration,
         {setName: setName});
     })
     .then(function(result) {
@@ -34,7 +39,7 @@ module.exports = function(client) {
 
   function recordMigration(migration) {
     return client.execTemplate(
-      '__record_migration',
+      statements.recordMigration,
       {setName: migration.setName},
       migration);
   }
@@ -49,7 +54,7 @@ module.exports = function(client) {
     .then(function() { return migrationTableExists(setName); })
     .then(function(exists) {
       if (exists) {
-        return client.execTemplate('__clear_migrations', {setName: setName});
+        return client.execTemplate(statements.clearMigrations, {setName: setName});
       }
     });
   }

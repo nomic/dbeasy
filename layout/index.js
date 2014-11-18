@@ -34,7 +34,12 @@ function addDefaultFields(fields, defaults) {
 module.exports = function(client) {
   var exposed = {};
 
-  var onReady = client.prepareDir(__dirname + '/sql');
+
+  var statements;
+  var onReady = client.loadStatements(__dirname + '/sql')
+  .then(function(stmts) {
+    statements = stmts;
+  });
 
   var expose = function(fn) {
     exposed[fn.name] = function() {
@@ -83,7 +88,7 @@ module.exports = function(client) {
   function tableExists(specName, spec) {
     var tableName = _str.underscored(specName);
     var parts = tableName.split('.');
-    return client.exec('__get_table_info', {
+    return client.exec(statements.getTableInfo, {
       schema: parts[0],
       table: parts[1]
     })
@@ -105,7 +110,7 @@ module.exports = function(client) {
   expose(getColumnInfo);
   function getColumnInfo(tableName) {
     var parts = tableName.split('.');
-    return client.exec('__get_column_info', {
+    return client.exec(statements.getColumnInfo, {
       schema: parts[0],
       table: parts[1]
     })
@@ -135,7 +140,7 @@ module.exports = function(client) {
 
     return ensureNamespace(namespace)
     .then(function() {
-      return client.execTemplate('__create_table', {
+      return client.execTemplate(statements.createTable, {
         tableName: table,
         columnDefinitions: fieldsToDDL(spec.columns).join(',\n  '),
         hasId: !!spec.columns.id
