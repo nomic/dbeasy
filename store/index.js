@@ -7,7 +7,7 @@ SYS_COL_PREFIX = util.SYS_COL_PREFIX,
 BAG_COL = util.BAG_COL;
 
 var defaultFields = {
-  id:      'bigint NOT NULL',
+  id:      'bigserial PRIMARY KEY',
   created: 'timestamp without time zone DEFAULT now() NOT NULL',
   updated: 'timestamp without time zone DEFAULT now() NOT NULL',
 };
