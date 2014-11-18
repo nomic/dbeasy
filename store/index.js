@@ -62,13 +62,13 @@ exports.store = function(client, storeName, options) {
         var fieldName = _str.camelize(colName),
         val = data[fieldName];
 
-        if (!val && isPartialUpdate) {
+        if (_.isUndefined(val) && isPartialUpdate) {
           return;
         }
 
         colNames.push(colName);
 
-        if (!val) {
+        if (_.isUndefined(val)) {
           colVals.push(col.columnDefault ? 'DEFAULT' : 'NULL');
           return;
         }
