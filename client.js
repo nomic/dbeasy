@@ -14,10 +14,8 @@ makePool = require('./pool'),
 makeStore = require('./store').store;
 
 
-function loadQuery(loadpath, fileName) {
-  return fs.readFileAsync(loadpath+"/"+fileName).then(function(data) {
-    return data.toString();
-  });
+function compileTemplate(content) {
+  return handlebars.compile(content, {noEscape: true});
 }
 
 function error(msg, detail, cause) {
@@ -76,7 +74,7 @@ function loadStatement(filePath) {
   if (filePath.slice(-8) === '.sql.hbs') {
     return fs.readFileAsync(filePath)
     .then(function(data) {
-      statement.template = handlebars.compile(data.toString());
+      statement.template = compileTemplate(data.toString());
       return statement;
     });
   }
@@ -214,27 +212,28 @@ function clientFn(options) {
       tplQuery = {template: tplQuery};
     }
 
-    var query, sql;
+    var query, cacheKey;
     if (tplQuery.name) {
-      var cacheKey = tplQuery.name + JSON.stringify(templateParams);
-
-
+      cacheKey = tplQuery.name + JSON.stringify(templateParams);
       query = client.__cachedTemplates[cacheKey];
-      if (! query) {
-        sql = tplQuery.template(templateParams);
-        query = {
-          // Max length of prepared statement is NAMEDATALEN (64)
-          name: md5(cacheKey),
-          sql: sql,
-          params: parseNamedParams(sql)
-        };
-      }
-    } else {
-      sql = tplQuery.template(templateParams);
+    }
+    if (! query) {
+      var template = _.isString(tplQuery.template)
+        ? compileTemplate(tplQuery.template)
+        : tplQuery.template;
+
+      var sql = template(templateParams);
       query = {
         sql: sql,
         params: parseNamedParams(sql)
       };
+
+      // We're only caching templates that are also prepared
+      if (cacheKey) {
+        // Max length of prepared statement is NAMEDATALEN (64)
+        query.name = md5(cacheKey);
+        client.__cachedTemplates[cacheKey] = query;
+      }
     }
 
     return self.exec(query, values);

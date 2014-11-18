@@ -12,7 +12,7 @@ function makeMigration(date, description) {
   var migration = {
     date: date,
     description: description,
-    sql: ''
+    template: ''
   };
   return migration;
 }
@@ -28,7 +28,7 @@ function setSql(migration, sqlLines) {
   }
 
   // If there was nothing but comments and blanks, we keep it.
-  migration.sql = lines.length ? lines.join('\n') : sqlLines.join('\n');
+  migration.template = lines.length ? lines.join('\n') : sqlLines.join('\n');
 
   return migration;
 }
