@@ -172,33 +172,32 @@ suite("Client", function() {
   });
 
   test("prepare a statement", function(done) {
-    db = createDb({loadpath: __dirname, poolSize:10});
+    db = createDb({poolSize:10});
 
-    var preparing = db.prepare('test_query');
-
-    var inserting = preparing.then(function() {
-      return db.query('INSERT INTO foo VALUES (1), (2), (3), (4);');
+    db.loadStatement(__dirname + '/test_query.sql')
+    .then(function(statement) {
+      return db.query('INSERT INTO foo VALUES (1), (2), (3), (4);')
+      .then(function() {
+        return db.exec(statement, 2);
+      })
+      .then(function(result) {
+        assert.equal(result.length, 2);
+        done();
+      }).catch(done);
     });
-
-    var querying = inserting.then(function() {
-      return db.exec('test_query', 2);
-    });
-
-    querying.then(function(result) {
-      assert.equal(result.length, 2);
-      done();
-    }).catch(done);
   });
 
   test("prepare all statements in a directory", function(done) {
     db = createDb({loadpath: __dirname, poolSize:10});
 
-    db.prepareDir(__dirname + '/test_sql')
-    .then(function() { return db.exec('select_1'); })
-    .then(function(rows) { assert.equal(rows[0].one, 1); })
-    .then(function() { return db.execTemplate('select_2'); })
-    .then(function(rows) { assert.equal(rows[0].two, 2); })
-    .then(done, done);
+    var statements = db.loadStatements(__dirname + '/test_sql')
+    .then(function(statements) {
+      return db.exec(statements.select1)
+      .then(function(rows) { assert.equal(rows[0].one, 1); })
+      .then(function() { return db.execTemplate(statements.select2); })
+      .then(function(rows) { assert.equal(rows[0].two, 2); })
+      .then(done, done);
+    })
   });
 
   test("parseNamedParams", function() {
@@ -215,11 +214,11 @@ suite("Client", function() {
   });
 
   test("prepare statemnt with named args", function(done) {
-    db = createDb({loadpath: __dirname, poolSize:10});
+    db = createDb({poolSize:10});
 
-    db.prepare('select_named_args')
-    .then(function() {
-      return db.exec('select_named_args', {
+    db.loadStatement(__dirname + '/select_named_args.sql')
+    .then(function(statement) {
+      return db.exec(statement, {
         foo: 'F',
         bar: 'B'
       });
@@ -232,45 +231,20 @@ suite("Client", function() {
   });
 
   test("prepare a statement from a template", function(done) {
-    db = createDb({loadpath: __dirname, poolSize:10});
+    db = createDb({poolSize:10});
 
-    var preparing = db.prepareTemplate('descending', 'test_query_template.sql.hbs', {direction: 'DESC'});
-
-    var inserting = preparing.then(function() {
-      return db.query('INSERT INTO foo VALUES (1), (2), (3), (4);');
-    });
-
-    var querying = inserting.then(function() {
-      return db.exec('descending', 2);
-    });
-
-    querying.then(function(result) {
-      assert.equal(result.length, 2);
-      assert.equal(result[0].bar, 4);
-      assert.equal(result[1].bar, 3);
-      done();
-    }).catch(done);
-  });
-
-
-  test("db.execTemplate", function(done) {
-    db = createDb({loadpath: __dirname, poolSize:10});
-
-    var preparing = db.prepare('test_query_template.sql.hbs');
-
-    var inserting = preparing.then(function() {
-      return db.query('INSERT INTO foo VALUES (1), (2), (3), (4);');
-    });
-
-    var querying = inserting.then(function() {
-      return db.execTemplate('test_query_template', {direction: 'DESC'}, 2);
-    });
-
-    querying.then(function(result) {
-      assert.equal(result.length, 2);
-      assert.equal(result[0].bar, 4);
-      assert.equal(result[1].bar, 3);
-      done();
+    db.loadStatement(__dirname + '/test_query_template.sql.hbs')
+    .then(function(statement) {
+      return db.query('INSERT INTO foo VALUES (1), (2), (3), (4);')
+      .then(function() {
+        return db.execTemplate(statement, {direction: 'DESC'}, 2);
+      })
+      .then(function(result) {
+        assert.equal(result.length, 2);
+        assert.equal(result[0].bar, 4);
+        assert.equal(result[1].bar, 3);
+        done();
+      });
     }).catch(done);
   });
 
@@ -279,21 +253,21 @@ suite("Client", function() {
     db = createDb({loadpath: __dirname, poolSize:10});
     var counter = 0;
 
-    db.prepare('update_stmt', 'UPDATE fooid SET bar = bar+1 WHERE id = 0;');
-    db.prepare('select_stmt', 'SELECT * from fooid;');
+    var update = 'UPDATE fooid SET bar = bar+1 WHERE id = 0;';
+    var select = 'SELECT * from fooid;';
     return db.query('INSERT INTO fooid VALUES (0, 0);')
     .then(function() {
       function again(db) {
         if (counter === 10) return;
 
         return Promise.all([
-          db.exec('update_stmt'),
-          db.exec('update_stmt'),
-          db.exec('update_stmt'),
-          db.exec('update_stmt'),
+          db.exec(update),
+          db.exec(update),
+          db.exec(update),
+          db.exec(update),
           ])
         .then(function(){
-          return db.exec('select_stmt').then( function(result) {
+          return db.exec(select).then( function(result) {
             assert.equal(result[0].bar, (counter+1)*4);
             counter += 1;
             return again(db);
