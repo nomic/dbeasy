@@ -1,18 +1,36 @@
 'use strict';
 var _ = require('lodash'),
     Promise = require('bluebird'),
-    layoutModule = require('../layout');
+    layoutModule = require('../layout'),
+    parseMigrations = require('./parse'),
+    storeModule = require('../store');
 
 module.exports = function(client) {
 
   var migrator = {};
   var layout = layoutModule(client);
-  var migrations = {};
-  var onReady = client.prepareDir(__dirname + '/sql');
+  var loadedMigrations = {};
+  var templateVars = {};
 
+  var statements;
+  var onReady = client.loadStatements(__dirname + '/sql')
+  .then(function(stmts) {
+    statements = stmts;
+  });
 
-  function ensureMigrationTable(setName) {
-    return layout.ensureTable(setName + '.migration', {
+  var col = {};
+  _.each(
+    _.extend({}, storeModule.defaultFields, storeModule.metaFields),
+    function(def, name) {
+      col[name] = name + ' ' + def;
+    });
+
+  col.timestamps = col.created + ',\n  ' + col.updated;
+
+  templateVars.col = col;
+
+  function ensureMigrationTable(schema) {
+    return layout.ensureTable(schema + '.migration', {
       columns: {
         date: 'timestamp without time zone NOT NULL',
         description: 'text NOT NULL',
@@ -20,12 +38,12 @@ module.exports = function(client) {
       }});
   }
 
-  function loadLastMigrationDate(setName) {
-    return ensureMigrationTable(setName)
+  function loadLastMigrationDate(schema) {
+    return ensureMigrationTable(schema)
     .then(function() {
       return client.execTemplate(
-        '__get_last_migration',
-        {setName: setName});
+        statements.getLastMigration,
+        {schema: schema});
     })
     .then(function(result) {
       return result.length && result[0].date;
@@ -34,81 +52,77 @@ module.exports = function(client) {
 
   function recordMigration(migration) {
     return client.execTemplate(
-      '__record_migration',
-      {setName: migration.setName},
+      statements.recordMigration,
+      {schema: migration.schema},
       migration);
   }
 
-  function migrationTableExists(setName) {
-    return layout.tableExists(setName + '.migration');
+  function migrationTableExists(schema) {
+    return layout.tableExists(schema + '.migration');
   }
 
   migrator.clearMigrations = clearMigrations;
-  function clearMigrations(setName) {
+  function clearMigrations(schema) {
     return onReady
-    .then(function() { return migrationTableExists(setName); })
+    .then(function() { return migrationTableExists(schema); })
     .then(function(exists) {
       if (exists) {
-        return client.execTemplate('__clear_migrations', {setName: setName});
+        return client.execTemplate(statements.clearMigrations, {schema: schema});
       }
     });
   }
 
-  migrator.collector = collector;
-  function collector(setName) {
-    if (! _.isString(setName)) {
-      throw new TypeError('Expected a string name identifying the migration set');
-    }
-    var setMigrations = [];
-    migrations[setName] = setMigrations;
-    var prevMigrationDate;
+  migrator.loadMigrations = loadMigrations;
+  function loadMigrations(filePath, opts) {
+    return parseMigrations(filePath)
+    .then(function(migrations) {
+      if (!migrations.length) {
+        throw new Error('No migrations found: ' + filePath);
+      }
+      return addMigrations(migrations, opts);
+    });
+  }
 
-    function migration(isoDateStr, description) {
-      var date = new Date(isoDateStr);
-      if (isNaN(date.getTime())) {
-        throw new Error(
-          'Invalid ISO date string: ' + isoDateStr);
+  migrator.templateVars = templateVars;
+
+  migrator.addMigrations = addMigrations;
+  function addMigrations(migrations, opts) {
+    opts = _.defaults(opts || {}, {
+      schema: 'public'
+    });
+
+    var prevMigrationDate = new Date('1970-01-01');
+    migrations = _.map(migrations, function(migration) {
+      var date = migration.date;
+
+      if (isNaN(date.getTime()) || !_.isDate(date)) {
+        throw new TypeError(
+          'Invalid date object: ' + date);
       }
 
-      if (prevMigrationDate && (prevMigrationDate.getTime() === date.getTime())) {
+      if (prevMigrationDate.getTime() === date.getTime()) {
         throw new Error(
           'Migration has identical time stamp; bad: ' + date);
       }
-      if (prevMigrationDate && (prevMigrationDate > date)) {
+      if (prevMigrationDate > date) {
         throw new Error(
           'Migrations must remain ordered by date; bad: ' + date);
       }
-
       prevMigrationDate = date;
 
-      var api = {};
-      var migration_ = {
-        setName: setName,
-        date: date,
-        description: description || 'unnamed',
-        tasks: []
-      };
-      api.addStore = function(specName, spec) {
-        migration_.tasks.push(function() {
-          return layout.addStore(specName, spec);
-        });
-        return api;
-      };
+      return _.extend({}, {schema: opts.schema}, migration);
+    });
 
-      setMigrations.push(migration_);
-
-      return api;
-    }
-
-    return migration;
+    loadedMigrations[opts.schema] = (
+      (loadedMigrations[opts.schema] || []).concat(migrations));
   }
 
   function getPendingMigrations() {
     return Promise.all(_.transform(
-      migrations,
-      function(results, setMigrations, setName) {
+      loadedMigrations,
+      function(results, setMigrations, schema) {
         results.push(
-          loadLastMigrationDate(setName)
+          loadLastMigrationDate(schema)
           .then(function(lastDate) {
             return _.filter(setMigrations, function(migration) {
               return (!lastDate || (migration.date > lastDate));
@@ -135,9 +149,9 @@ module.exports = function(client) {
         client._logger.info(
           'Running migration',
           _.pick(migration, 'date', 'description'));
-        return Promise.reduce(migration.tasks, function(__, task) {
-          return task();
-        }, null)
+        return (migration.template
+          ? client.execTemplate(migration.template, templateVars)
+          : client.exec(migration.sql))
         .then(function() {
           return recordMigration(migration);
         });

@@ -7,7 +7,7 @@ SYS_COL_PREFIX = util.SYS_COL_PREFIX,
 BAG_COL = util.BAG_COL;
 
 var defaultFields = {
-  id:      'bigint NOT NULL',
+  id:      'bigserial PRIMARY KEY',
   created: 'timestamp without time zone DEFAULT now() NOT NULL',
   updated: 'timestamp without time zone DEFAULT now() NOT NULL',
 };
@@ -27,7 +27,13 @@ exports.store = function(client, storeName, options) {
   });
   var layout = require('../layout')(client);
 
-  var onReady = client.prepareDir(__dirname + '/sql');
+  var statements;
+  var onReady = client.loadStatements(__dirname + '/sql')
+  .then(function(stmts) {
+    statements = stmts;
+  });
+
+
   var store = {};
 
   function getWriteContext(data, opts) {
@@ -154,7 +160,7 @@ exports.store = function(client, storeName, options) {
     })
     .then(function(ctx) {
       return client.execTemplate(
-        '__insert',
+        statements.insert,
         ctx.templateVars,
         ctx.inputData
         );
@@ -179,7 +185,7 @@ exports.store = function(client, storeName, options) {
     })
     .then(function(ctx) {
       return client.execTemplate(
-        '__update',
+        statements.update,
         ctx.templateVars,
         ctx.inputData
         );
@@ -205,7 +211,7 @@ exports.store = function(client, storeName, options) {
   store.getByIds = function(ids) {
     return onReady
     .then(function() {
-      return client.execTemplate('__get_by_ids', {
+      return client.execTemplate(statements.getByIds, {
         tableName: _str.underscored(storeName)
       }, ids)
       .then(derive());
@@ -215,7 +221,7 @@ exports.store = function(client, storeName, options) {
   store.deleteByIds = function(ids) {
     return onReady
     .then(function() {
-      return client.execTemplate('__delete_by_ids', {
+      return client.execTemplate(statements.deleteByIds, {
         tableName: _str.underscored(storeName)
       }, ids);
     });
@@ -235,7 +241,7 @@ exports.store = function(client, storeName, options) {
     }, templateVars);
     return onReady
     .then(function() {
-      return client.execTemplate('__find', templateVars, opts)
+      return client.execTemplate(statements.find, templateVars, opts)
       .then(derive());
     });
   };

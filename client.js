@@ -14,10 +14,8 @@ makePool = require('./pool'),
 makeStore = require('./store').store;
 
 
-function loadQuery(loadpath, fileName) {
-  return fs.readFileAsync(loadpath+"/"+fileName).then(function(data) {
-    return data.toString();
-  });
+function compileTemplate(content) {
+  return handlebars.compile(content, {noEscape: true});
 }
 
 function error(msg, detail, cause) {
@@ -38,6 +36,7 @@ function getKeyPath(obj, keyPath) {
 }
 
 //http://stackoverflow.com/questions/7616461/generate-a-hash-from-string-in-javascript-jquery
+//An integer only hash of a string
 function hashCode(str) {
   var hash = 0, i, chr, len;
   if (str.length === 0) return hash;
@@ -49,6 +48,12 @@ function hashCode(str) {
   return hash;
 }
 
+function md5(str) {
+  var md5sum = crypto.createHash('md5');
+  md5sum.update(str);
+  return md5sum.digest('hex');
+}
+
 clientFn.parseNamedParams = parseNamedParams;
 function parseNamedParams(text) {
   var paramsRegex = /\$([0-9]+):\ *([a-zA-Z_\.\$]+)/mg,
@@ -58,6 +63,51 @@ function parseNamedParams(text) {
     params[parseInt(matches[1], 10) - 1] = matches[2];
   }
   return params;
+}
+
+clientFn.loadStatement = loadStatement;
+function loadStatement(filePath) {
+  var statement = {
+    preparedName: md5(filePath),
+    path: filePath
+  };
+  if (filePath.slice(-8) === '.sql.hbs') {
+    return fs.readFileAsync(filePath)
+    .then(function(data) {
+      statement.template = compileTemplate(data.toString());
+      return statement;
+    });
+  }
+  return fs.readFileAsync(filePath)
+  .then(function(data) {
+    statement.sql = data.toString();
+    statement.params = parseNamedParams(statement.sql);
+    return statement;
+  });
+
+}
+
+clientFn.loadStatements = loadStatements;
+function loadStatements(dirPath) {
+  return fs.readdirAsync(dirPath)
+  .then(function(filePaths) {
+    filePaths = _.filter(filePaths, function(file) {
+      return (
+       file.slice(-4) === '.sql'
+       || file.slice(-8) === '.sql.hbs'
+       );
+    });
+
+    var statements = {};
+    _.each(filePaths, function(filePath) {
+      var key = (filePath.slice(-8) === '.sql.hbs')
+        ? path.basename(filePath, '.sql.hbs')
+        : path.basename(filePath, '.sql');
+      statements[_str.camelize(key)] = loadStatement(dirPath + '/' + filePath);
+    });
+
+    return Promise.props(statements);
+  });
 }
 
 module.exports = clientFn;
@@ -156,58 +206,72 @@ function clientFn(options) {
     })([]);
   };
 
-  Connection.prototype.execTemplate = function(templateKey, templateParams, values) {
+  Connection.prototype.execTemplate = function(tplQuery, templateParams, values) {
     var self = this;
-    var key = templateKey + JSON.stringify(templateParams);
-
-    // Max length of prepared statement is NAMEDATALEN (64)
-    var md5sum = crypto.createHash('md5');
-    md5sum.update(key);
-    key = md5sum.digest('hex');
-
-    if (client.__prepared[key]) {
-      return this.exec(key, values);
+    if (_.isString(tplQuery)) {
+      tplQuery = {template: tplQuery};
     }
 
-    var template = client.__templates[templateKey];
-    if (! template) {
-      throw error("template not found: " + templateKey);
+    var query, cacheKey;
+    if (tplQuery.name) {
+      cacheKey = tplQuery.name + JSON.stringify(templateParams);
+      query = client.__cachedTemplates[cacheKey];
     }
-    var text = template(templateParams);
-    prepare(key, null, text);
-    return self.exec(key, values);
+    if (! query) {
+      var template = _.isString(tplQuery.template)
+        ? compileTemplate(tplQuery.template)
+        : tplQuery.template;
+
+      var sql = template(templateParams);
+      query = {
+        sql: sql,
+        params: parseNamedParams(sql)
+      };
+
+      // We're only caching templates that are also prepared
+      if (cacheKey) {
+        // Max length of prepared statement is NAMEDATALEN (64)
+        query.name = md5(cacheKey);
+        client.__cachedTemplates[cacheKey] = query;
+      }
+    }
+
+    return self.exec(query, values);
   };
 
-  Connection.prototype.exec = function(key, values) {
+  Connection.prototype.exec = function(query, values) {
     var self = this;
-    if (values !== undefined) { values = _.rest(arguments); }
-    var prepared = client.__prepared[key];
-    if (! prepared) {
-      throw error("prepared statement not found: " + key);
+    if (_.isString(query)) {
+      query = {sql: query};
+      query.params = parseNamedParams(query);
     }
+    if (values !== undefined) { values = _.rest(arguments); }
+
     if (values && !_.isArray(values[0]) && _.isObject(values[0])) {
       //then assume we have named params
-      if (!prepared.namedParams) {
-        throw error("prepared statement does not have named params defined: " + key);
+      if (!query.params) {
+        throw error("Statement does not have named params defined: " + query.sql);
       }
       var namedValues = values[0];
-      values = _.map(prepared.namedParams, function(paramName) {
+      values = _.map(query.params, function(paramName) {
         var val = getKeyPath(namedValues, paramName);
         return val;
       });
     }
 
-    var statements = prepared.text.split(/;\s*$/m);
+    var statements = query.sql.split(/;\s*$/m);
     return (function next(results) {
       var statement = statements.shift();
       if (!statement) return results.pop();
 
       var opts = {
-        name: results.length + '.' + key,
         text: statement + ';',
-        values: values,
-        types: prepared.types
+        values: values
       };
+
+      // This will cause the statement to be prepared
+      if (query.name) opts.name = results.length + '.' + query.name;
+
       logger.debug([
         '>>>> DBEasy execute ',
         JSON.stringify(_.omit(opts, 'text')),
@@ -238,7 +302,7 @@ function clientFn(options) {
           '>xx> DBEasy error ',
           err,
           '<xx<'].join('\n'));
-        throw error('exec failed', {key: key, values: values}, err);
+        throw error('exec failed', {name: opts.name, sql: opts.text, values: values}, err);
       });
     })([]);
   };
@@ -256,249 +320,131 @@ function clientFn(options) {
     });
   };
 
-// set the load path
-client.loadpath = function(path) {
-  client.__loadpath = path;
-};
+  // set the load path
+  client.loadpath = function(path) {
+    client.__loadpath = path;
+  };
 
 
-// Execute a previously prepared statement
-client.exec = function(/*statement, params*/) {
-  var args = _.toArray(arguments);
-  return client.useConnection(function(conn) {
-    return conn.exec.apply(conn, args);
-  });
-};
+  // Execute a previously prepared statement
+  client.exec = function(/*statement, params*/) {
+    var args = _.toArray(arguments);
+    return client.useConnection(function(conn) {
+      return conn.exec.apply(conn, args);
+    });
+  };
 
-client.execTemplate = function(/*statement, templateParams, params*/) {
-  var args = _.toArray(arguments);
-  return client.useConnection(function(conn) {
-    return conn.execTemplate.apply(conn, args);
-  });
-};
+  client.execTemplate = function(/*statement, templateParams, params*/) {
+    var args = _.toArray(arguments);
+    return client.useConnection(function(conn) {
+      return conn.execTemplate.apply(conn, args);
+    });
+  };
 
-// Execute a sql query string
-client.query = function(sql /*, params*/) {
-  var args = _.toArray(arguments);
-  return client.useConnection( function(conn) {
-    return conn.query.apply(sql, args);
-  });
-};
+  // Execute a sql query string
+  client.query = function(sql /*, params*/) {
+    var args = _.toArray(arguments);
+    return client.useConnection( function(conn) {
+      return conn.query.apply(sql, args);
+    });
+  };
 
-// Execute a sql query string and don't run
-// the results through egress
-client.queryRaw = function(sql /*, params*/) {
-  var args = _.toArray(arguments);
-  return client.useConnection( function(conn) {
-    return conn.queryRaw.apply(sql, args);
-  });
-};
+  // Execute a sql query string and don't run
+  // the results through egress
+  client.queryRaw = function(sql /*, params*/) {
+    var args = _.toArray(arguments);
+    return client.useConnection( function(conn) {
+      return conn.queryRaw.apply(sql, args);
+    });
+  };
 
-// Returns a promise for work completed within the
-// scope of a single transaction.
-//
-// You supply a function which receives a connection and
-// returns a promise.
-//
-// The transaction has already been opened on the connection,
-// and it will automatically be committed once your promise
-// completes.
-//
-// NOTE: You should only use this function if you require
-// multiple statements to be executed within a single transaction.
-// Generally try to avoid this.  You must understand locking
-// (and deadlocking) in postgres before using this.
-client.transaction = function(workFn) {
-  return useConnection( function(conn) {
-    conn.begin();
-    var working = workFn(conn);
-    return working.then(function() {
-      return conn.end().then(function() {
-        return working;
+  // Returns a promise for work completed within the
+  // scope of a single transaction.
+  //
+  // You supply a function which receives a connection and
+  // returns a promise.
+  //
+  // The transaction has already been opened on the connection,
+  // and it will automatically be committed once your promise
+  // completes.
+  //
+  // NOTE: You should only use this function if you require
+  // multiple statements to be executed within a single transaction.
+  // Generally try to avoid this.  You must understand locking
+  // (and deadlocking) in postgres before using this.
+  client.transaction = function(workFn) {
+    return useConnection( function(conn) {
+      conn.begin();
+      var working = workFn(conn);
+      return working.then(function() {
+        return conn.end().then(function() {
+          return working;
+        });
       });
     });
-  });
-};
-
-client.synchronize = function(lockName, workFn) {
-  var lockNum = hashCode(lockName);
-  return useConnection( function(conn) {
-    return conn.query(
-      'SELECT pg_advisory_lock(' + lockNum + ');')
-    .then(function() {
-      return workFn();
-    })
-    .finally(function() {
-      return conn.query(
-        'SELECT pg_advisory_unlock(' + lockNum + ');');
-    });
-  });
-};
-
-// Returns a promise for work completed against a connection.
-//
-// You supply a function which receives a connection and
-// returns a promise.
-//
-// The connection is automatically returned to the pool
-// once your promise completes.
-//
-// NOTE: You shouldn't really need to use this.  This is
-// only necessary if you need fine grain control over
-// transactions.
-client.useConnection = function(workFn) {
-  return useConnection( function(conn) {
-    return workFn(conn);
-  });
-};
-
-client.prepareTemplate = function(key, templateFile, context, types) {
-  var reading = loadQuery(client.__loadpath, templateFile);
-
-  var templating = reading.then(function(templateBody) {
-    var template = handlebars.compile(templateBody);
-    var text = template(context);
-
-    return text;
-  });
-
-  var stashing = templating.then(function(text) {
-    client.__prepared[key] = {
-      name: key,
-      text: text,
-      types: types
-    };
-
-    return key;
-  });
-
-  return stashing;
-};
-
-function compileTemplate(key, path, fname) {
-  return loadQuery(path, fname)
-  .then(function(text) {
-    client.__templates[key] = handlebars.compile(text);
-  });
-}
-
-function prepare(key, types, text, path, fname) {
-  var stash = function(text, namedParams) {
-    client.__prepared[key] = {
-      name: key,
-      text: text,
-      types: types,
-      namedParams: namedParams
-    };
   };
-  if (text) {
-    stash(text, parseNamedParams(text));
-    return Promise.resolve(key);
-  }
-  var reading = loadQuery(path, fname)
-  .then(function(text) {
-    stash(text, parseNamedParams(text));
-  })
-  .then(function() {
-    return key;
-  }, function(err) {
-    throw error("Failed to prepare", {key: key}, err);
-  });
-  return reading;
-}
 
-client.prepare = function() {
-  var key, text, types, path, fname;
-  assert(arguments.length <= 3);
-  key = arguments[0];
-  if (_.isString(arguments[1])) {
-    text = arguments[1];
-    types = arguments[2];
-  } else if (arguments.length === 2) {
-    types = arguments[1];
-  }
-  if (text) return prepare(key, types, text);
-
-  path = client.__loadpath;
-  if (key.slice(-8) === '.sql.hbs') {
-    fname = key;
-    key = key.slice(0, -8);
-    return compileTemplate(key, path, fname);
-  }
-
-  if (key.slice(-4) === '.sql') {
-    fname = key;
-    key = key.slice(0, -4);
-  } else {
-    fname = key + '.sql';
-  }
-  return prepare(key, types, text, path, fname);
-};
-
-client.prepareDir = function(path) {
-  return fs.readdirAsync(path)
-  .then(function(files) {
-    var sqlFiles = _.filter(files, function(file) {
-      return (
-       file.slice(-4) === '.sql'
-       || file.slice(-8) === '.sql.hbs'
-       );
+  client.synchronize = function(lockName, workFn) {
+    var lockNum = hashCode(lockName);
+    return useConnection( function(conn) {
+      return conn.query(
+        'SELECT pg_advisory_lock(' + lockNum + ');')
+      .then(function() {
+        return workFn();
+      })
+      .finally(function() {
+        return conn.query(
+          'SELECT pg_advisory_unlock(' + lockNum + ');');
+      });
     });
-    return Promise.all(
-      _.map(sqlFiles, function(file) {
-        if (file.slice(-8) === '.sql.hbs') {
-          key = file.slice(0, -8);
-          return compileTemplate(key, path, file);
-        }
-        var key = file.slice(0, -4);
-        return prepare(key, null, null, path, file);
-      }));
-  });
-};
+  };
 
-client.prepareAll = function(/* statements */) {
-  return Promise.all(
-    _.map(arguments, function(arg) {
-      if (_.isString(arg)) {
-        return client.prepare(arg);
-      }
-    //arrays are used to pass through statement name
-    //as well as argument types
-    return client.prepare.apply(null, arg);
-    }))
-  .then( function(results) {
-    _.each(results, function(r) {
-      logger.debug("prepared statement loaded:", r);
+  // Returns a promise for work completed against a connection.
+  //
+  // You supply a function which receives a connection and
+  // returns a promise.
+  //
+  // The connection is automatically returned to the pool
+  // once your promise completes.
+  //
+  // NOTE: You shouldn't really need to use this.  This is
+  // only necessary if you need fine grain control over
+  // transactions.
+  client.useConnection = function(workFn) {
+    return useConnection( function(conn) {
+      return workFn(conn);
     });
-    return results;
-  });
-};
+  };
 
-client.close = function() {
-  _.each(pg.pools.all, function(pool, key) {
-    pool.drain(function() {
-      pool.destroyAllNow();
+  client.close = function() {
+    _.each(pg.pools.all, function(pool, key) {
+      pool.drain(function() {
+        pool.destroyAllNow();
+      });
+      delete pg.pools.all[key];
     });
-    delete pg.pools.all[key];
-  });
-};
+  };
 
-client.cleansedConfig = function() {
-  return _.omit(options, "password", "logger", "egress");
-};
+  client.cleansedConfig = function() {
+    return _.omit(options, "password", "logger", "egress");
+  };
 
-client.store = function(specName, storeOptions) {
-  assert(
-    options.enableStore,
-    'store not availble: create client with {enableStore: true}');
-  return makeStore(client, specName, storeOptions);
-};
+  client.store = function(specName, storeOptions) {
+    assert(
+      options.enableStore,
+      'store not availble: create client with {enableStore: true}');
+    return makeStore(client, specName, storeOptions);
+  };
 
-var onSqlPrepared = null;
-client.__prepareSql = function() {
-  return onSqlPrepared || client.prepareDir(path.join(__dirname, 'sql'));
-};
+  var onSqlPrepared = null;
+  client.__prepareSql = function() {
+    return onSqlPrepared || client.prepareDir(path.join(__dirname, 'sql'));
+  };
 
-return client;
+  //Make available here for convenience;
+  client.loadStatement = loadStatement;
+  client.loadStatements = loadStatements;
+
+  return client;
 }
 
