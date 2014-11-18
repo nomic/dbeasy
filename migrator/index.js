@@ -2,7 +2,8 @@
 var _ = require('lodash'),
     Promise = require('bluebird'),
     layoutModule = require('../layout'),
-    parseMigrations = require('./parse');
+    parseMigrations = require('./parse'),
+    storeModule = require('../store');
 
 module.exports = function(client) {
 
@@ -17,6 +18,16 @@ module.exports = function(client) {
     statements = stmts;
   });
 
+  var col = {};
+  _.each(
+    _.extend({}, storeModule.defaultFields, storeModule.metaFields),
+    function(def, name) {
+      col[name] = name + ' ' + def;
+    });
+
+  col.timestamps = col.created + ',\n  ' + col.updated;
+
+  templateVars.col = col;
 
   function ensureMigrationTable(schema) {
     return layout.ensureTable(schema + '.migration', {
