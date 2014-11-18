@@ -126,6 +126,27 @@ suite('Store', function() {
 
   });
 
+  test('Falsey updates are correctly applied', function() {
+    var store;
+    return layout.addStore('bigBiz.emp', {
+      columns: {
+        isHappy: 'boolean NOT NULL DEFAULT true',
+        footnote: 'text',
+      }
+    })
+    .then(function() {
+      store = client.store('bigBiz.emp');
+      return store.insert({
+        isHappy: false,
+        footnote: ''
+      });
+    })
+    .then(function(result) {
+      expect(result).to.have.property('isHappy', false);
+      expect(result).to.have.property('footnote', '');
+    });
+  });
+
   test('Adding a store twice ends in error', function() {
     return layout.addStore('bigBiz.emp', {
       columns: {
