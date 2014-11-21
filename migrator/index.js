@@ -117,7 +117,8 @@ module.exports = function(client) {
       (loadedMigrations[opts.schema] || []).concat(migrations));
   }
 
-  function getPendingMigrations() {
+  migrator.getPending = getPending;
+  function getPending() {
     return Promise.all(_.transform(
       loadedMigrations,
       function(results, setMigrations, schema) {
@@ -138,7 +139,7 @@ module.exports = function(client) {
   migrator.up = migrator.runPending = runPending;
   function runPending() {
     return onReady.then(function() {
-      return getPendingMigrations();
+      return getPending();
     })
     .then(function(pendingMigrations) {
       if (!pendingMigrations.length) {
