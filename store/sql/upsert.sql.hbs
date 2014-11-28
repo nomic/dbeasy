@@ -1,0 +1,14 @@
+--{{#each bindVars}}
+-- ${{@key}}: {{this}}{{/each}}
+--
+  WITH update_
+       AS (
+            UPDATE {{tableName}}
+               SET ({{colNamesStr}}) = ({{colValsStr}})
+             WHERE {{#each whereColBinds}}{{this}} = ${{@key}}
+               AND {{/each}}__deleted IS NULL
+         RETURNING {{tableName}}.*
+       )
+INSERT INTO ({{colNamesStr}})
+SELECT ({{colValsStr}})
+ WHERE NOT EXISTS ( SELECT 1 FROM update_ );
