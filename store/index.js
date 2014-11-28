@@ -3,6 +3,7 @@ var _ = require('lodash'),
 _str = require('underscore.string'),
 assert = require('assert'),
 util = require('../util'),
+Promise = require('bluebird'),
 SYS_COL_PREFIX = util.SYS_COL_PREFIX,
 BAG_COL = util.BAG_COL;
 
@@ -36,7 +37,19 @@ exports.store = function(client, storeName, options) {
 
   var store = {};
 
-  function getWriteContext(data, opts) {
+  function initContext() {
+    return {
+      inputData: {},
+      templateVars: {
+        tableName: _str.underscored(storeName),
+        bindVars: {},
+        colNamesStr: null,
+        colValsStr: null
+      }
+    };
+  }
+
+  function addWriteContext(onCtx, data, opts) {
     var isPartialUpdate = opts.partial || false;
 
     assert(opts.partial !== undefined);
@@ -44,8 +57,11 @@ exports.store = function(client, storeName, options) {
     // Do not save derived values.
     data = _.omit(data, _.keys(options.derived));
 
-    return layout.getColumnInfo(tableName)
-    .then(function(cols) {
+    return Promise.all([
+      layout.getColumnInfo(tableName),
+      onCtx
+    ])
+    .spread(function(cols, ctx) {
       cols = _.reject(cols, function(col) {
         return (
           _.contains(neverUpdated, col.columnName)
@@ -107,21 +123,20 @@ exports.store = function(client, storeName, options) {
       colNames.push('updated');
       colVals.push('DEFAULT');
 
-      return {
-        inputData: inputData,
-        templateVars: {
-          tableName: tableName,
-          bindVars: bindVars,
-          colNamesStr: colNames.join(', '),
-          colValsStr: colVals.join(', ')
-        }
-      };
+      _.extend(ctx.inputData, inputData);
+      _.extend(ctx.templateVars, {
+        bindVars: bindVars,
+        colNamesStr: colNames.join(', '),
+        colValsStr: colVals.join(', ')
+      });
+      return ctx;
 
     });
   }
 
-  function addWhereContext(onInsertContext, whereProps) {
-    return onInsertContext.then(function(ctx) {
+  function addWhereContext(context, whereProps) {
+    return Promise.resolve(context)
+    .then(function(ctx) {
       ctx.templateVars.whereColBinds = {};
       var nextBindVar = _.keys(ctx.templateVars.bindVars).length + 1;
       _.each(whereProps, function(val, name) {
@@ -153,13 +168,18 @@ exports.store = function(client, storeName, options) {
     };
   }
 
-  store.insert = function(data) {
+  store.insert = function(data, conn) {
+    var handler = conn || client;
     return onReady
     .then(function() {
-      return getWriteContext(data, {partial: false});
+      return addWriteContext(
+        initContext(),
+        data,
+        {partial: false}
+        );
     })
     .then(function(ctx) {
-      return client.execTemplate(
+      return handler.execTemplate(
         statements.insert,
         ctx.templateVars,
         ctx.inputData
@@ -168,11 +188,22 @@ exports.store = function(client, storeName, options) {
     .then(_.compose(first, derive()));
   };
 
-  store.replace = function(whereProps, data) {
-    return store.update(whereProps, data, {partial: false});
+
+  store.delsert = function(whereProps, values) {
+    return client.transaction(function(conn) {
+      return store.delete(whereProps, conn)
+      .then(function() {
+        return store.insert(_.extend({}, whereProps, values), conn);
+      });
+    });
   };
 
-  store.update = function(whereProps, data, opts) {
+  store.replace = function(whereProps, data, conn) {
+    return store.update(whereProps, data, {partial: false}, conn);
+  };
+
+  store.update = function(whereProps, data, opts, conn) {
+    var handler = conn || client;
     opts = _.defaults(opts || {}, {
       partial: true
     });
@@ -180,74 +211,89 @@ exports.store = function(client, storeName, options) {
     return onReady
     .then(function() {
       return addWhereContext(
-        getWriteContext(data, opts),
+        addWriteContext(
+          initContext(),
+          data,
+          opts),
         whereProps);
     })
     .then(function(ctx) {
-      return client.execTemplate(
+      return handler.execTemplate(
         statements.update,
         ctx.templateVars,
-        ctx.inputData
-        );
+        ctx.inputData);
     })
     .then(_.compose(first, derive()));
   };
 
-  store.getById = function(id) {
+  store.getById = function(id, conn) {
     return onReady
     .then(function() {
-      return store.getByIds([id])
+      return store.getByIds([id], conn)
       .then(first);
     });
   };
 
-  store.deleteById = function(id) {
+  store.deleteById = function(id, conn) {
     return onReady
     .then(function() {
-      return store.deleteByIds([id]);
+      return store.deleteByIds([id], conn);
     });
   };
 
-  store.getByIds = function(ids) {
+  store.getByIds = function(ids, conn) {
+    var handler = conn || client;
     return onReady
     .then(function() {
-      return client.execTemplate(statements.getByIds, {
-        tableName: _str.underscored(storeName)
-      }, ids)
+      return handler.execTemplate(
+        statements.getByIds,
+        initContext().templateVars,
+        ids)
       .then(derive());
     });
   };
 
-  store.deleteByIds = function(ids) {
+  store.deleteByIds = function(ids, conn) {
+    var handler = conn || client;
     return onReady
     .then(function() {
-      return client.execTemplate(statements.deleteByIds, {
-        tableName: _str.underscored(storeName)
-      }, ids);
+      return handler.execTemplate(
+        statements.deleteByIds,
+        initContext().templateVars,
+        ids);
     });
   };
 
-  store.find = function(opts) {
-    var idx = 1;
-    var templateVars = {
-      bindVars: {},
-      columns: {},
-      tableName: _str.underscored(storeName)
-    };
-    templateVars = _.transform(opts, function(result, val, key) {
-      result.bindVars[idx] = key;
-      result.columns[idx] = _str.underscored(key);
-      return result;
-    }, templateVars);
+  store.delete = function(whereProps, conn) {
+    var handler = conn || client;
     return onReady
     .then(function() {
-      return client.execTemplate(statements.find, templateVars, opts)
+      return addWhereContext(initContext(), whereProps);
+    })
+    .then(function(ctx) {
+      return handler.execTemplate(
+        statements.delete,
+        ctx.templateVars,
+        ctx.inputData);
+    });
+  };
+
+  store.find = function(whereProps, conn) {
+    var handler = conn || client;
+    return onReady
+    .then(function() {
+      return addWhereContext(initContext(), whereProps);
+    }).then(function(ctx) {
+      return handler.execTemplate(
+        statements.find,
+        ctx.templateVars,
+        ctx.inputData)
       .then(derive());
     });
   };
 
-  store.findOne = function(opts) {
-    return store.find(opts)
+  store.findOne = function(whereProps, conn) {
+    return store.find(whereProps, conn)
     .then(function(rows) {
       return rows[0] || null;
     });

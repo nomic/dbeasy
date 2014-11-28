@@ -1,7 +1,8 @@
 --{{#each bindVars}}
 -- ${{@key}}: {{this}}{{/each}}
 --
-SELECT *
-  FROM {{tableName}}
+UPDATE {{tableName}}
+   SET __deleted = current_timestamp
  WHERE {{#each whereColBinds}}{{this}} = ${{@key}}
-   AND {{/each}}__deleted IS NULL;
+   AND {{/each}}__deleted IS NULL
+RETURNING *;

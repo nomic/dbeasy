@@ -147,6 +147,34 @@ suite('Store', function() {
     });
   });
 
+  test('delsert', function() {
+    var store;
+    return layout.addStore('bigBiz.emp', {
+      columns: {
+        topic: 'text',
+        rant: 'text'
+      }
+    })
+    .then(function() {
+      store = client.store('bigBiz.emp');
+      return store.delsert({topic: 'politics'}, {rant: 'blarg!'});
+    })
+    .then(function(result) {
+      expect(result).to.have.property('topic', 'politics');
+      expect(result).to.have.property('id', '1');
+      expect(result).to.have.property('rant', 'blarg!');
+    })
+    .then(function() {
+      store = client.store('bigBiz.emp');
+      return store.delsert({topic: 'politics'}, {rant: 'roar!'});
+    })
+    .then(function(result) {
+      expect(result).to.have.property('topic', 'politics');
+      expect(result).to.have.property('id', '2');
+      expect(result).to.have.property('rant', 'roar!');
+    });
+  });
+
   test('Adding a store twice ends in error', function() {
     return layout.addStore('bigBiz.emp', {
       columns: {
