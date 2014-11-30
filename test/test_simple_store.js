@@ -272,5 +272,22 @@ suite('Store', function() {
     });
   });
 
+  test('Bug fix: attempt write to non-existant __bag', function() {
+    return layout.addTable('bigBiz.emp', {
+      columns: {
+        firstName: 'text',
+        lastName: 'text',
+      }
+    })
+    .then(function() {
+      var store = client.store('bigBiz.emp');
+      return store.insert({firstName: 'jim', lastName: undefined});
+    })
+    .then(function(result) {
+      expect(result).to.have.property('firstName');
+      expect(result).to.not.have.property('lastName');
+    });
+  });
+
 });
 

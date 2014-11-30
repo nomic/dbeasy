@@ -62,7 +62,10 @@ exports.store = function(client, storeName, options) {
       onCtx
     ])
     .spread(function(cols, ctx) {
+
+      var hasUpdated = false;
       cols = _.reject(cols, function(col) {
+        hasUpdated = hasUpdated || col.columnName === 'updated';
         return (
           _.contains(neverUpdated, col.columnName)
           || (isPartialUpdate && (col.columnName === BAG_COL)));
@@ -74,15 +77,17 @@ exports.store = function(client, storeName, options) {
       var bindVars = {};
 
       // Fields that have a matching column
-      var placed = [];
+      var fieldNames = [];
       _.each(cols, function(col) {
         var colName = col.columnName;
+        var fieldName = _str.camelize(colName);
+        fieldNames.push(fieldName);
+
         if (_str.startsWith(colName, SYS_COL_PREFIX)) {
           return;
         }
 
-        var fieldName = _str.camelize(colName),
-        val = data[fieldName];
+        var val = data[fieldName];
 
         if (_.isUndefined(val) && isPartialUpdate) {
           return;
@@ -99,11 +104,10 @@ exports.store = function(client, storeName, options) {
         colVals.push('$' + bindNum);
         bindVars[bindNum] = fieldName;
         bindNum++;
-        placed.push(fieldName);
 
       });
 
-      var bagData = _.omit(data, placed);
+      var bagData = _.omit(data, fieldNames);
 
       if (!_.isEmpty(bagData)) {
         if (isPartialUpdate) {
@@ -120,8 +124,10 @@ exports.store = function(client, storeName, options) {
         }
       }
 
-      colNames.push('updated');
-      colVals.push('DEFAULT');
+      if (hasUpdated) {
+        colNames.push('updated');
+        colVals.push('DEFAULT');
+      }
 
       _.extend(ctx.inputData, inputData);
       _.extend(ctx.templateVars, {
@@ -142,7 +148,7 @@ exports.store = function(client, storeName, options) {
       _.each(whereProps, function(val, name) {
         ctx.inputData[name] = val;
         ctx.templateVars.bindVars[nextBindVar] = name;
-        ctx.templateVars.whereColBinds[nextBindVar] = name;
+        ctx.templateVars.whereColBinds[nextBindVar] = _str.underscored(name);
         nextBindVar++;
       });
       return ctx;
@@ -168,13 +174,13 @@ exports.store = function(client, storeName, options) {
     };
   }
 
-  store.insert = function(data, conn) {
+  store.insert = function(values, conn) {
     var handler = conn || client;
     return onReady
     .then(function() {
       return addWriteContext(
         initContext(),
-        data,
+        values,
         {partial: false}
         );
     })
@@ -190,6 +196,9 @@ exports.store = function(client, storeName, options) {
 
 
   store.delsert = function(whereProps, values) {
+    // The where properties will also be values of the resulting
+    // row because a this operation replaces the entire row.
+    values = _.extend({}, values, whereProps);
     return client.transaction(function(conn) {
       return store.delete(whereProps, conn)
       .then(function() {
@@ -198,22 +207,25 @@ exports.store = function(client, storeName, options) {
     });
   };
 
-  store.replace = function(whereProps, data, conn) {
-    return store.update(whereProps, data, {partial: false}, conn);
+  store.replace = function(whereProps, values, conn) {
+    // The where properties will also be values of the resulting
+    // row because a this operation replaces the entire row.
+    values = _.extend({}, values, whereProps);
+    return store.update(whereProps, values, {partial: false}, conn);
   };
 
-  store.update = function(whereProps, data, opts, conn) {
+  store.update = function(whereProps, values, opts, conn) {
     var handler = conn || client;
     opts = _.defaults(opts || {}, {
       partial: true
     });
-    data = _.omit(data, _.keys(defaultFields));
+    values = _.omit(values, _.keys(defaultFields));
     return onReady
     .then(function() {
       return addWhereContext(
         addWriteContext(
           initContext(),
-          data,
+          values,
           opts),
         whereProps);
     })
