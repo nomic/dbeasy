@@ -290,6 +290,14 @@ exports.store = function(client, storeName, options) {
     });
   };
 
+  store.erase = function(conn) {
+    var handler = conn || client;
+    return onReady
+    .then(function() {
+      return handler.query('DELETE FROM ' + _str.underscored(storeName));
+    });
+  };
+
   store.find = function(whereProps, conn) {
     var handler = conn || client;
     return onReady

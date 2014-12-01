@@ -238,6 +238,31 @@ suite('Store', function() {
     });
   });
 
+  test('erase()', function() {
+    var store;
+    return layout.addStore('bigBiz.emp')
+    .then(function() {
+      store = client.store('bigBiz.emp');
+      return store.insert({});
+    })
+    .then(function() {
+      return client.query('SELECT * from big_biz.emp;');
+    })
+    .then(function(results) {
+      expect(results).to.have.length(1);
+    })
+    .then(function() {
+      return store.erase();
+    })
+    .then(function() {
+      return client.query('SELECT * from big_biz.emp;');
+    })
+    .then(function(results) {
+      expect(results).to.be.empty;
+    });
+  });
+
+
   test('Derived field', function() {
     var store;
     return layout.addStore('bigBiz.emp', {
