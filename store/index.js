@@ -9,13 +9,13 @@ BAG_COL = util.BAG_COL;
 
 var defaultFields = {
   id:      'bigserial PRIMARY KEY',
-  created: 'timestamp without time zone DEFAULT now() NOT NULL',
-  updated: 'timestamp without time zone DEFAULT now() NOT NULL',
+  created: 'timestamp with time zone DEFAULT now() NOT NULL',
+  updated: 'timestamp with time zone DEFAULT now() NOT NULL',
 };
 
 var metaFields = {
   __bag:     'json NOT NULL DEFAULT \'{}\'',
-  __deleted: 'timestamp without time zone'
+  __deleted: 'timestamp with time zone'
 };
 
 var neverUpdated = _.keys(defaultFields);

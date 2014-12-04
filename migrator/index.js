@@ -32,9 +32,9 @@ module.exports = function(client) {
   function ensureMigrationTable(schema) {
     return layout.ensureTable(schema + '.migration', {
       columns: {
-        date: 'timestamp without time zone NOT NULL',
+        date: 'timestamp with time zone NOT NULL',
         description: 'text NOT NULL',
-        completed: 'timestamp without time zone DEFAULT now() NOT NULL',
+        completed: 'timestamp with time zone DEFAULT now() NOT NULL',
       }});
   }
 
