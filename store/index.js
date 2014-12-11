@@ -211,10 +211,10 @@ exports.store = function(client, storeName, options) {
     // The where properties will also be values of the resulting
     // row because a this operation replaces the entire row.
     values = _.extend({}, values, whereProps);
-    return store.update(whereProps, values, {partial: false}, conn);
+    return _update(whereProps, values, {partial: false}, conn);
   };
 
-  store.update = function(whereProps, values, opts, conn) {
+  function _update(whereProps, values, opts, conn) {
     var handler = conn || client;
     opts = _.defaults(opts || {}, {
       partial: true
@@ -236,6 +236,10 @@ exports.store = function(client, storeName, options) {
         ctx.inputData);
     })
     .then(_.compose(first, derive()));
+  }
+
+  store.update = function(whereProps, values, conn) {
+    return _update(whereProps, values, {partial: true}, conn);
   };
 
   store.getById = function(id, conn) {
@@ -316,6 +320,25 @@ exports.store = function(client, storeName, options) {
     return store.find(whereProps, conn)
     .then(function(rows) {
       return rows[0] || null;
+    });
+  };
+
+  store.synchronizeOnRow = function(whereProps, workFn, conn) {
+    var handler = conn || client;
+    return onReady
+    .then(function() {
+      return handler.transaction(function(txConn) {
+        return addWhereContext(initContext(), whereProps)
+        .then(function(ctx) {
+          return txConn.execTemplate(
+            statements.selectForUpdate,
+            ctx.templateVars,
+            ctx.inputData);
+        })
+        .then(function() {
+          return workFn(txConn);
+        });
+      });
     });
   };
 

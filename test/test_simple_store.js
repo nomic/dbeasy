@@ -21,7 +21,7 @@ suite('Store', function() {
 
   setup(function() {
     if (client) client.close();
-    client = util.createDb({poolSize: 3, enableStore: true});
+    client = util.createDb({poolSize: 10, enableStore: true});
     layout = layoutModule(client);
     return layout.dropNamespace('bigBiz');
   });
@@ -294,6 +294,38 @@ suite('Store', function() {
     .then(function(result) {
       expect(result).to.have.property('first_name');
       expect(result.__bag).to.not.have.property('name');
+    });
+  });
+
+  test('synchronize on row', function() {
+    var store;
+    return layout.addStore('bigBiz.emp', {
+      columns: {
+        num: 'int NOT NULL',
+        goldStars: 'int DEFAULT 0',
+      }
+    })
+    .then(function() {
+      store = client.store('bigBiz.emp');
+      return store.insert({num: 1});
+    })
+    .then(function() {
+      var blockedTxn;
+      return store.synchronizeOnRow({num: 1}, function(conn) {
+        blockedTxn = store.update({num: 1}, {goldStars: 10});
+        return Promise.delay(50)
+        .then(function() {
+          return store.findOne({num: 1}, conn);
+        })
+        .then(function(result) {
+          expect(blockedTxn.isPending()).to.equal(true);
+          expect(result).to.have.property('goldStars', 0);
+          return store.update({num:1}, {goldStars: 5}, conn);
+        });
+      })
+      .then(function() {
+        return blockedTxn;
+      });
     });
   });
 

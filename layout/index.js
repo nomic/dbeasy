@@ -3,12 +3,9 @@ var _str = require('underscore.string'),
     _ = require('lodash'),
     store = require('../store');
 
-function fieldsToDDL(fields, isRefs) {
+function fieldsToDDL(fields) {
   return _.transform(fields, function(ddl, spec, name) {
     name = _str.underscored(name);
-    if (isRefs) {
-      name += '_id';
-    }
     ddl.push([name, spec].join(' '));
     return ddl;
   }, []);
@@ -142,8 +139,7 @@ module.exports = function(client) {
     .then(function() {
       return client.execTemplate(statements.createTable, {
         tableName: table,
-        columnDefinitions: fieldsToDDL(spec.columns).join(',\n  '),
-        hasId: !!spec.columns.id
+        columnDefinitions: fieldsToDDL(spec.columns).join(',\n  ')
       });
     });
 

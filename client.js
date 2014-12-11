@@ -375,10 +375,18 @@ function clientFn(options) {
   client.transaction = function(workFn) {
     return useConnection( function(conn) {
       conn.begin();
+
+      // Should blow up if result not a promise (not thenable) since
+      // this most likely means we forgot to return a promise.
       var working = workFn(conn);
-      return working.then(function() {
-        return conn.end().then(function() {
-          return working;
+      assert(
+        _.isFunction(working.then),
+        'Transaction function must return a promise');
+      return working
+      .then(function(result) {
+        return conn.end()
+        .then(function() {
+          return result;
         });
       });
     });
@@ -412,7 +420,11 @@ function clientFn(options) {
   // transactions.
   client.useConnection = function(workFn) {
     return useConnection( function(conn) {
-      return workFn(conn);
+      var working = workFn(conn);
+      assert(
+        _.isFunction(working.then),
+        'Connection function must return a promise');
+      return working;
     });
   };
 
