@@ -1,0 +1,8 @@
+--{{#each bindVars}}
+-- ${{@key}}: {{this}}{{/each}}
+--
+SELECT *
+  FROM {{tableName}}
+ WHERE {{#each whereColBinds}}{{this}} = ${{@key}}
+   AND {{/each}}__deleted IS NULL
+   FOR UPDATE;
