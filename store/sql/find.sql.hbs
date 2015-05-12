@@ -4,4 +4,5 @@
 SELECT *
   FROM {{tableName}}
  WHERE {{#each whereColBinds}}{{this}} = ${{@key}}
+   AND {{/each}}{{#each whereColAnyBinds}}{{this}} = ANY(${{@key}})
    AND {{/each}}__deleted IS NULL;

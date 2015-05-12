@@ -144,11 +144,18 @@ exports.store = function(client, storeName, options) {
     return Promise.resolve(context)
     .then(function(ctx) {
       ctx.templateVars.whereColBinds = {};
+      ctx.templateVars.whereColAnyBinds = {};
       var nextBindVar = _.keys(ctx.templateVars.bindVars).length + 1;
       _.each(whereProps, function(val, name) {
         ctx.inputData[name] = val;
         ctx.templateVars.bindVars[nextBindVar] = name;
-        ctx.templateVars.whereColBinds[nextBindVar] = _str.underscored(name);
+        if (_.isArray(val)) {
+          ctx.templateVars.whereColAnyBinds[nextBindVar] =
+            _str.underscored(name);
+        } else {
+          ctx.templateVars.whereColBinds[nextBindVar] =
+            _str.underscored(name);
+        }
         nextBindVar++;
       });
       return ctx;
@@ -344,4 +351,3 @@ exports.store = function(client, storeName, options) {
 
   return store;
 };
-
