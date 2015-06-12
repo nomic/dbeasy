@@ -4,5 +4,6 @@
 UPDATE {{tableName}}
    SET __deleted = current_timestamp
  WHERE {{#each whereColBinds}}{{this}} = ${{@key}}
+   AND {{/each}}{{#each whereColAnyBinds}}{{this}} = ANY(${{@key}})
    AND {{/each}}__deleted IS NULL
 RETURNING *;
