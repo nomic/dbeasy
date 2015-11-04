@@ -175,8 +175,8 @@ function clientFn(options) {
     return self.pgConnection.query('END');
   };
 
-  Connection.prototype.query = function(text, vals) {
-    return this.queryRaw(text, vals)
+  Connection.prototype.query = function() {
+    return this.queryRaw.apply(this, arguments)
     .then(function(results) {
       return results ? egressAll(results) : null;
     });
@@ -342,19 +342,19 @@ function clientFn(options) {
   };
 
   // Execute a sql query string
-  client.query = function(sql /*, params*/) {
+  client.query = function(/*, params*/) {
     var args = _.toArray(arguments);
     return client.useConnection( function(conn) {
-      return conn.query.apply(sql, args);
+      return conn.query.apply(conn, args);
     });
   };
 
   // Execute a sql query string and don't run
   // the results through egress
-  client.queryRaw = function(sql /*, params*/) {
+  client.queryRaw = function(/*, params*/) {
     var args = _.toArray(arguments);
     return client.useConnection( function(conn) {
-      return conn.queryRaw.apply(sql, args);
+      return conn.queryRaw.apply(conn, args);
     });
   };
 
@@ -459,4 +459,3 @@ function clientFn(options) {
 
   return client;
 }
-
