@@ -11,6 +11,10 @@ matrix:
         - nvm install $NODE_VERSION
         - node --version
         - npm install
+install:
+  npm install
+script:
+  npm test
 env:
   - NODE_VERSION="0.10"
   - NODE_VERSION="0.12"
