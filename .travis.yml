@@ -10,7 +10,7 @@ matrix:
         - source ~/.nvm/nvm.sh
 install:
   - nvm install $NODE_VERSION
-  - node -version
+  - node --version
   - npm install
 script:
   - npm test
