@@ -1,0 +1,18 @@
+matrix:
+  include:
+    - os: linux
+      before_install:
+        - nvm use $NODE_VERSION
+    - os: osx
+      before_install:
+        - rm -rf ~/.nvm
+        - git clone https://github.com/creationix/nvm.git ~/.nvm
+        - source ~/.nvm/nvm.sh
+        - nvm install $NODE_VERSION
+        - node --version
+        - npm install
+env:
+  - NODE_VERSION="0.10"
+  - NODE_VERSION="0.12"
+  - NODE_VERSION="4"
+  - NODE_VERSION="5"
