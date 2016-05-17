@@ -59,13 +59,13 @@ suite('Migration', function() {
   suite('Running', function() {
     var client;
     var migrator;
-    var migration;
+    var SCHEMA = 'school';
 
     setup(function() {
       if (client) client.close();
       client = util.createDb({poolSize: 3, enableStore: true});
       migrator = makeMigrator(client);
-      return migrator.clearMigrations('school')
+      return migrator.clearMigrations(SCHEMA)
       .then(function() {
         return layout(client).dropNamespace('school');
       });
@@ -76,9 +76,9 @@ suite('Migration', function() {
         date: new Date('2014-11-11T01:24'),
         description: 'create rooms',
         sql: 'CREATE TABLE school.classroom();\nCREATE TABLE school.cafeteria();'
-      }], {schema: 'school'});
+      }]);
 
-      return migrator.runPending()
+      return migrator.runPending(SCHEMA)
       .then(function() {
         return Promise.all([
           client.query('SELECT * FROM school.classroom;'),
@@ -100,9 +100,9 @@ suite('Migration', function() {
         date: new Date('2014-11-12T01:24'),
         description: 'create rooms',
         sql: 'CREATE TABLE school.cafeteria();'
-      }], {schema: 'school'});
+      }]);
 
-      return migrator.runPending()
+      return migrator.runPending(SCHEMA)
       .then(function() {
         return Promise.all([
           client.query('SELECT * FROM school.classroom;'),
@@ -115,6 +115,62 @@ suite('Migration', function() {
       });
     });
 
+    test('Identify missed migrations', function() {
+      migrator.addMigrations([{
+        date: new Date('2014-11-12T01:24'),
+        description: 'noop',
+        sql: 'SELECT;'
+      },{
+        date: new Date('2014-12-12T01:24'),
+        description: 'noop',
+        sql: 'SELECT;'
+      }]);
+
+      return Promise.resolve()
+        .then(function() {
+          return migrator
+            .getStatus(SCHEMA)
+            .then(_.spread(function(items, hasPending, hasMissing) {
+              expect(hasPending).to.equal(true);
+              expect(hasMissing).to.equal(false);
+            }));
+        })
+        .then(function() {
+          return migrator
+            .runPending(SCHEMA)
+            .then(function() {
+              return migrator.getStatus(SCHEMA);
+            })
+            .then(_.spread(function(items, hasPending, hasMissing) {
+              expect(hasPending).to.equal(false);
+              expect(hasMissing).to.equal(false);
+            }));
+        })
+        .then(function() {
+          migrator = makeMigrator(client);
+          migrator.addMigrations([{
+            date: new Date('2014-11-13T01:24'),
+            description: 'noop',
+            sql: 'SELECT;'
+          }]);
+          return migrator
+            .getStatus(SCHEMA)
+            .then(_.spread(function(items, hasPending, hasMissing) {
+              expect(hasPending).to.equal(false);
+              expect(hasMissing).to.equal(true);
+              expect(items[1]).to.eql({
+                date: new Date('2014-11-13T01:24'),
+                description: 'noop',
+                sql: 'SELECT;',
+                isCommitted: false,
+                candidateStatus: 'MISSING'
+              });
+            }));
+        });
+
+    });
+
+
     test('Do not allow misordered migrations', function() {
       return Promise.try(function() {
         migrator.addMigrations([{
@@ -122,7 +178,7 @@ suite('Migration', function() {
           description: 'create rooms',
           sql: ''
         },{
-          date: new Date('2014-11-12T01:24'),
+          date: new Date('2014-11-12T01:23'),
           description: 'create rooms',
           sql: ''
         }], {schema: 'school'});
@@ -154,10 +210,10 @@ suite('Migration', function() {
         date: new Date('2014-11-11T01:24'),
         description: 'create rooms',
         sql: 'CREATE TABLE school.classroom();'
-      }], {schema: 'school'});
-      return migrator.runPending()
+      }]);
+      return migrator.runPending(SCHEMA)
       .then(function() {
-        return migrator.runPending();
+        return migrator.runPending(SCHEMA);
       })
       .then(function() {
         migrator.addMigrations([{
@@ -165,7 +221,7 @@ suite('Migration', function() {
           description: 'create rooms',
           sql: 'CREATE TABLE school.classroom();'
         }], {schema: 'school'});
-        return migrator.runPending();
+        return migrator.runPending(SCHEMA);
       });
 
     });
@@ -187,7 +243,7 @@ suite('Migration', function() {
         testSqlPath + '10_create_classroom_table.sql',
         {schema: 'school'})
       .then(function() {
-        return migrator.runPending();
+        return migrator.runPending(SCHEMA);
       })
       .then(function() {
         return Promise.all([
@@ -201,11 +257,9 @@ suite('Migration', function() {
 
     test('Load and run migration with template', function() {
       migrator.templateVars['table'] = 'school.classroom';
-      return migrator.loadMigrations(
-        testSqlPath + '11_create_table.sql.hbs',
-        {schema: 'school'})
+      return migrator.loadMigrations(testSqlPath + '11_create_table.sql.hbs')
       .then(function() {
-        return migrator.runPending();
+        return migrator.runPending(SCHEMA);
       })
       .then(function() {
         return client.query('SELECT * FROM school.classroom;');

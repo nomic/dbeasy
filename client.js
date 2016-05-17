@@ -222,6 +222,10 @@ function clientFn(options) {
         ? compileTemplate(tplQuery.template)
         : tplQuery.template;
 
+      if (!template) {
+        throw new Error('Statement not loaded as a template: ' + tplQuery.path);
+      }
+
       var sql = template(templateParams);
       query = {
         sql: sql,

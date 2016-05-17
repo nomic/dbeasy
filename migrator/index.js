@@ -5,11 +5,16 @@ var _ = require('lodash'),
     parseMigrations = require('./parse'),
     storeModule = require('../store');
 
+var CANDIDATE_STATUS = {
+  PENDING: 'PENDING',
+  MISSING: 'MISSING'
+};
+
 module.exports = function(client) {
 
   var migrator = {};
   var layout = layoutModule(client);
-  var loadedMigrations = {};
+  var candidateMigrations = [];
   var templateVars = {};
 
   var statements;
@@ -38,22 +43,19 @@ module.exports = function(client) {
       }});
   }
 
-  function loadLastMigrationDate(schema) {
+  function getCommittedMigrations(schema) {
     return ensureMigrationTable(schema)
-    .then(function() {
-      return client.execTemplate(
-        statements.getLastMigration,
-        {schema: schema});
-    })
-    .then(function(result) {
-      return result.length && result[0].date;
-    });
+      .then(function() {
+        return client.execTemplate(
+          statements.getMigrations,
+          {schema: schema});
+      });
   }
 
-  function recordMigration(migration) {
+  function recordMigration(migration, schema) {
     return client.execTemplate(
       statements.recordMigration,
-      {schema: migration.schema},
+      {schema: schema},
       migration);
   }
 
@@ -110,57 +112,82 @@ module.exports = function(client) {
       }
       prevMigrationDate = date;
 
-      return _.extend({}, {schema: opts.schema}, migration);
+      return _.clone(migration);
     });
 
-    loadedMigrations[opts.schema] = (
-      (loadedMigrations[opts.schema] || []).concat(migrations));
+    candidateMigrations = candidateMigrations.concat(migrations);
   }
 
-  migrator.getPending = getPending;
-  function getPending() {
-    return Promise.all(_.transform(
-      loadedMigrations,
-      function(results, setMigrations, schema) {
-        results.push(
-          loadLastMigrationDate(schema)
-          .then(function(lastDate) {
-            return _.filter(setMigrations, function(migration) {
-              return (!lastDate || (migration.date > lastDate));
-            });
-          }));
-        return results;
-      }, []))
-    .then(function(resultsBySet) {
-      return _.sortBy(_.flatten(resultsBySet), 'date');
-    });
+  migrator.getStatus = getStatus;
+  function getStatus(schema) {
+    return onReady.then(function() {
+      return getCommittedMigrations(schema);
+    })
+      .then(function(committedMigrations) {
+        var candidate = _.map(candidateMigrations, function(m) {
+          return _.extend({}, m, {isCommitted: false});
+        });
+        var committed = _.map(committedMigrations, function(m) {
+          return _.extend({}, m, {isCommitted: true});
+        });
+        var committedByDate = _.indexBy(committed, 'date');
+        var candidateByDate = _.indexBy(candidate, 'date');
+        var allByDate = _.extend({}, candidateByDate, committedByDate);
+        var allMigrations = _.sortBy(_.values(allByDate), 'date');
+
+        var hasMissing = false;
+        var hasPending = false;
+        var hasComitted = false;
+
+        allMigrations = _.map(allMigrations.reverse(), function(m) {
+          if (!hasComitted && !m.isCommitted) {
+            m.candidateStatus = CANDIDATE_STATUS.PENDING;
+            hasPending = true;
+          }
+          if (hasComitted && !m.isCommitted) {
+            m.candidateStatus = CANDIDATE_STATUS.MISSING;
+            hasMissing = true;
+          }
+          if (!hasComitted && m.isCommitted) {
+            hasComitted = true;
+          }
+          return m;
+        }).reverse();
+
+        return [allMigrations, hasPending, hasMissing];
+      });
   }
 
   migrator.up = migrator.runPending = runPending;
-  function runPending() {
+  function runPending(schema) {
     return onReady.then(function() {
-      return getPending();
+      return getStatus(schema);
     })
-    .then(function(pendingMigrations) {
-      if (!pendingMigrations.length) {
-        client._logger.info('No pending migrations');
-        return;
-      }
-      return Promise.reduce(pendingMigrations, function(__, migration) {
-        client._logger.info(
-          'Running migration',
-          _.pick(migration, 'date', 'description'));
-        return (migration.template
-          ? client.execTemplate(migration.template, templateVars)
-          : client.exec(migration.sql))
-        .then(function() {
-          return recordMigration(migration);
-        });
-      }, null);
-    });
+      .then(_.spread(function(migrations, hasPending, hasMissing) {
+        if (!hasPending && !hasMissing) {
+          client._logger.info('No pending migrations');
+          return;
+        }
+        if (hasMissing) {
+          throw new Error('One ore more migrations were missed');
+        }
+
+        return Promise.reduce(
+          _.filter(migrations, {candidateStatus: CANDIDATE_STATUS.PENDING}),
+          function(__, migration) {
+            client._logger.info(
+              'Running migration',
+              _.pick(migration, 'date', 'description'));
+            return (migration.template
+                    ? client.execTemplate(migration.template, templateVars)
+                    : client.exec(migration.sql))
+              .then(function() {
+                return recordMigration(migration, schema);
+              });
+          }, null);
+      }));
   }
 
   return migrator;
 
 };
-
