@@ -115,10 +115,16 @@ module.exports = function(client) {
 
   migrator.templateVars = templateVars;
 
+  migrator.addMigrations = addMigrations;
+  function addMigrations(migrations) {
+    _.each(migrations, addMigration);
+  }
+
   migrator.addMigration = addMigration;
   function addMigration(migration) {
 
-    var prevMigrationDate = new Date('1970-01-01');
+    var prevMigrationDate =
+          (_.last(candidateMigrations) || {date : new Date('1970-01-01')}).date;
     var date = migration.date;
 
     if (isNaN(date.getTime()) || !_.isDate(date)) {
@@ -134,7 +140,6 @@ module.exports = function(client) {
       throw new Error(
         'Migrations must remain ordered by date; bad: ' + date);
     }
-    prevMigrationDate = date;
 
     candidateMigrations.push(_.cloneDeep(migration));
   }
@@ -215,7 +220,6 @@ module.exports = function(client) {
           return m;
         }).reverse();
 
-//        console.log("ARGS", allMigrations, hasPending, hasMissing);
         return [allMigrations, hasPending, hasMissing];
       });
   }
