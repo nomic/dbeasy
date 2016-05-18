@@ -152,7 +152,7 @@ module.exports = function(client) {
           moment().tz('America/Los_Angeles').format('YYYY-MM-DDTHH:mm:ss');
 
     var filename =
-          timestamp + '_' + _.snakeCase(name);
+          timestamp + '_' + _.snakeCase(name) + '.sql';
     var contents = [
       '-- ',
       '-- ' + _.snakeCase(name),
