@@ -7,10 +7,8 @@
 var Promise = require('bluebird'),
     _ = require('lodash'),
     expect = require('chai').expect,
-    assert = require('assert'),
     util = require('./util'),
     makeMigrator = require('../migrator'),
-    parse = require('../migrator/parse'),
     layout = require('../layout');
 
 Promise.longStackTraces();
@@ -18,43 +16,6 @@ Promise.longStackTraces();
 suite('Migration', function() {
 
   var testSqlPath = __dirname + '/test_migration_sql/';
-  suite('Parsing', function() {
-
-
-    test('Empty file yields emtpy array', function() {
-      return parse(testSqlPath + '00_empty.sql')
-      .then(function(migrations) {
-        expect(migrations).to.have.length(0);
-      });
-    });
-
-    test('Blank migration parses', function() {
-      return parse(testSqlPath + '01_comment_only.sql')
-      .then(function(migrations) {
-        var migration = migrations[0];
-        expect(migration.date).to.eql(new Date('2014-11-10T20:00'));
-        expect(migration.description).to.equal('Description goes here');
-      });
-    });
-
-    test('File with single migration parses', function() {
-      return parse(testSqlPath + '02_single_statement.sql')
-      .then(function(migrations) {
-        var migration = migrations[0];
-        expect(migration.template).to.contain('SELECT 1 FROM emp;');
-      });
-    });
-
-    test('File with multiple migrations parses', function() {
-      return parse(testSqlPath + '04_multiple_migrations.sql')
-      .then(function(migrations) {
-        expect(migrations).to.have.length(2);
-        expect(migrations[0].description).to.equal('Description 1 goes here');
-        expect(migrations[1].description).to.equal('Description 2 goes here');
-      });
-    });
-
-  });
 
   suite('Running', function() {
     var client;
@@ -212,61 +173,19 @@ suite('Migration', function() {
         sql: 'CREATE TABLE school.classroom();'
       }]);
       return migrator.runPending(SCHEMA)
-      .then(function() {
-        return migrator.runPending(SCHEMA);
-      })
-      .then(function() {
-        migrator.addMigrations([{
-          date: new Date('2014-11-11T01:24'),
-          description: 'create rooms',
-          sql: 'CREATE TABLE school.classroom();'
-        }], {schema: 'school'});
-        return migrator.runPending(SCHEMA);
-      });
+        .then(function() {
+          return migrator.runPending(SCHEMA);
+        })
+        .then(function() {
+          var migrator = makeMigrator(client);
+          migrator.addMigrations([{
+            date: new Date('2014-11-11T01:24'),
+            description: 'create rooms',
+            sql: 'CREATE TABLE school.classroom();'
+          }], {schema: 'school'});
+          return migrator.runPending(SCHEMA);
+        });
 
-    });
-
-    test('Catch error on empty migration file', function() {
-      return migrator.loadMigrations(
-        testSqlPath + '00_empty.sql',
-        {schema: 'school'})
-      .then(function() {
-        throw new Error('Expected exception');
-      }, function(err) {
-        expect(err.message).to.match(/00_empty.sql/);
-      });
-
-    });
-
-    test('Load and run migrations from file', function() {
-      return migrator.loadMigrations(
-        testSqlPath + '10_create_classroom_table.sql',
-        {schema: 'school'})
-      .then(function() {
-        return migrator.runPending(SCHEMA);
-      })
-      .then(function() {
-        return Promise.all([
-          client.query('SELECT * FROM school.classroom;'),
-        ]);
-      })
-      .spread(function(classrooms) {
-        expect(classrooms).to.be.empty;
-      });
-    });
-
-    test('Load and run migration with template', function() {
-      migrator.templateVars['table'] = 'school.classroom';
-      return migrator.loadMigrations(testSqlPath + '11_create_table.sql.hbs')
-      .then(function() {
-        return migrator.runPending(SCHEMA);
-      })
-      .then(function() {
-        return client.query('SELECT * FROM school.classroom;');
-      })
-      .then(function(classrooms) {
-        expect(classrooms).to.be.empty;
-      });
     });
 
   });
