@@ -2,8 +2,11 @@
 var _ = require('lodash'),
     Promise = require('bluebird'),
     layoutModule = require('../layout'),
-    parseMigrations = require('./parse'),
-    storeModule = require('../store');
+    storeModule = require('../store'),
+    fs = Promise.promisifyAll(require('fs')),
+    path = require('path'),
+    assert = require('assert'),
+    moment = require('moment-timezone');
 
 var CANDIDATE_STATUS = {
   PENDING: 'PENDING',
@@ -33,6 +36,34 @@ module.exports = function(client) {
   col.timestamps = col.created + ',\n  ' + col.updated;
 
   templateVars.col = col;
+
+  function makeMigration(filePath, date, description, sql) {
+    assert(_.isString(filePath));
+    assert(_.isString(description));
+    assert(!_.isEmpty(description));
+    assert(_.isDate(date));
+    var migration = {
+      path: filePath,
+      date: date,
+      description: description,
+      template: sql
+    };
+    return migration;
+  }
+
+  function readMigration(filePath) {
+    var filename = path.basename(filePath, '.sql');
+
+    return fs.readFileAsync(filePath).then(function(data) {
+      return makeMigration(
+        filePath,
+        new Date(_.first(filename.split('_'))),
+        _.rest(filename.split('_')).join('_'),
+        data.toString()
+      );
+    });
+
+  }
 
   function ensureMigrationTable(schema) {
     return layout.ensureTable(schema + '.migration', {
@@ -74,48 +105,78 @@ module.exports = function(client) {
     });
   }
 
-  migrator.loadMigrations = loadMigrations;
-  function loadMigrations(filePath, opts) {
-    return parseMigrations(filePath)
-    .then(function(migrations) {
-      if (!migrations.length) {
-        throw new Error('No migrations found: ' + filePath);
-      }
-      return addMigrations(migrations, opts);
+  migrator.loadMigration = loadMigration;
+  function loadMigration(filePath, opts) {
+    return readMigration(filePath)
+    .then(function(migration) {
+      return addMigration(migration, opts);
     });
   }
 
   migrator.templateVars = templateVars;
 
-  migrator.addMigrations = addMigrations;
-  function addMigrations(migrations, opts) {
-    opts = _.defaults(opts || {}, {
-      schema: 'public'
-    });
+  migrator.addMigration = addMigration;
+  function addMigration(migration) {
 
     var prevMigrationDate = new Date('1970-01-01');
-    migrations = _.map(migrations, function(migration) {
-      var date = migration.date;
+    var date = migration.date;
 
-      if (isNaN(date.getTime()) || !_.isDate(date)) {
-        throw new TypeError(
-          'Invalid date object: ' + date);
-      }
+    if (isNaN(date.getTime()) || !_.isDate(date)) {
+      throw new TypeError(
+        'Invalid date object: ' + date);
+    }
 
-      if (prevMigrationDate.getTime() === date.getTime()) {
-        throw new Error(
-          'Migration has identical time stamp; bad: ' + date);
-      }
-      if (prevMigrationDate > date) {
-        throw new Error(
-          'Migrations must remain ordered by date; bad: ' + date);
-      }
-      prevMigrationDate = date;
+    if (prevMigrationDate.getTime() === date.getTime()) {
+      throw new Error(
+        'Migration has identical time stamp; bad: ' + date);
+    }
+    if (prevMigrationDate > date) {
+      throw new Error(
+        'Migrations must remain ordered by date; bad: ' + date);
+    }
+    prevMigrationDate = date;
 
-      return _.clone(migration);
-    });
+    candidateMigrations.push(_.cloneDeep(migration));
+  }
 
-    candidateMigrations = candidateMigrations.concat(migrations);
+  migrator.createMigration = createMigration;
+  function createMigration(name, dir) {
+    assert(name, 'migration name required');
+    assert(dir, 'migration directory required');
+    var timestamp =
+          moment().tz('America/Los_Angeles').format('YYYY-MM-DDTHH:mm:ss');
+
+    var filename =
+          timestamp + '_' + _.snakeCase(name);
+    var contents = [
+      '-- ',
+      '-- ' + _.snakeCase(name),
+      '-- ',
+      '',
+      ''
+    ].join('\n');
+
+    var path = dir + '/' + filename;
+    return fs.writeFileAsync(path, contents)
+      .then(function() {
+        return path;
+      });
+  }
+
+  migrator.redate = redate;
+  function redate(filePath) {
+    assert(filePath, 'a path is required');
+    var namePart = _.rest(path.basename(filePath).split('_')).join('_');
+    var dir = path.dirname(filePath);
+    var timestamp =
+          moment().tz('America/Los_Angeles').format('YYYY-MM-DDTHH:mm:ss');
+
+    var newPath = dir + '/' + timestamp + '_' + namePart;
+
+    return fs.renameAsync(filePath, newPath)
+      .then(function() {
+        return newPath;
+      });
   }
 
   migrator.getStatus = getStatus;
@@ -154,6 +215,7 @@ module.exports = function(client) {
           return m;
         }).reverse();
 
+//        console.log("ARGS", allMigrations, hasPending, hasMissing);
         return [allMigrations, hasPending, hasMissing];
       });
   }
