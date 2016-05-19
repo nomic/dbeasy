@@ -100,9 +100,9 @@ exports.store = function(client, storeName, options) {
           return;
         }
 
-        inputData[fieldName] = val;
+        inputData['set_' + fieldName] = val;
         colVals.push('$' + bindNum);
-        bindVars[bindNum] = fieldName;
+        bindVars[bindNum] = 'set_' + fieldName;
         bindNum++;
 
       });

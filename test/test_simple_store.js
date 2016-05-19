@@ -122,6 +122,19 @@ suite('Store', function() {
       expect(result).to.have.property('deptId', '4');
       assert(result.updated > result.created,
         'expected updated to be greater than created');
+    })
+    .then(function() {
+      return store.update(
+        { id: '1', deptId: '4' },
+        {
+          deptId: '5',
+        });
+    })
+    .then(function(result) {
+      expect(result).to.have.property('firstName', 'Melly');
+      expect(result).to.have.property('deptId', '5');
+      assert(result.updated > result.created,
+             'expected updated to be greater than created');
     });
 
   });
@@ -347,4 +360,3 @@ suite('Store', function() {
   });
 
 });
-
