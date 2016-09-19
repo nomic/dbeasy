@@ -1,6 +1,6 @@
 {
   "name": "dbeasy",
-  "version": "0.12.4",
+  "version": "0.13.0",
   "description": "Promise-based wrapper for postgresql with helpers for transactions.",
   "main": "index.js",
   "scripts": {
