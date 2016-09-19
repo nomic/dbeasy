@@ -60,24 +60,26 @@ suite("Client", function() {
       return db.useConnection( function() {
         gotFirstConnection = true;
         return db.useConnection( function() {
-          gotSecondConnection = false;
-          return;
+          gotSecondConnection = true;
+          return Promise.resolve();
         });
       });
     };
 
-    grab2Conns().then( function() {
-      done(new Error("Did not deadlock as expected"));
-    }, done);
-
-        // give it a little time before reporting success
-        setTimeout(function() {
-          assert.equal(gotFirstConnection, true);
-          assert.equal(gotSecondConnection, false);
-          done();
-        }, 1000);
-
+    var deadlocked = true;
+    grab2Conns()
+      .finally(function() {
+        done(new Error('Exepected deadlock'));
       });
+
+//    give it a little time before reporting success
+    setTimeout(function() {
+      assert.equal(gotFirstConnection, true);
+      assert.equal(gotSecondConnection, false);
+      done();
+    }, 1000);
+
+  });
 
   test("don't deadlock on parallel connection requests", function(done) {
     db = createDb({poolSize: 1});

@@ -1,49 +1,44 @@
 'use strict';
 var pg = require('pg'),
-    Promise = require('bluebird');
-
-var pgConnect = Promise.promisify(pg.connect, pg);
+    Pool = require('pg').Pool,
+    Promise = require('bluebird'),
+    _ = require('lodash'),
+    parse = require('pg-connection-string').parse;
 
 module.exports = function(options) {
   var pool = {};
   options = options || {};
 
-  var conString = buildConString(options);
+  var config = buildConfig(options);
 
-  // The postgres driver depends on this globally accessible module
-  // variable to set the pool size.  This is problematic if you have
-  // multiple pools at different sizes.  We must be sure to call
-  // initPool() right away so that the value is not changed before the
-  // pool is setup.
-  var oldPoolSize = pg.defaults.poolSize;
-  var poolSize = pg.defaults.poolSize = options.poolSize || pg.defaults.poolSize;
-  var onPool = initPool();
-  pg.defaults.poolSize = oldPoolSize;
+  config.max = options.poolSize || 1;
+  config.ssl = options.ssl;
+  var pgPool = new Pool(config);
+  pgPool = Promise.promisifyAll(pgPool);
 
+  function buildConfig(pgconf) {
+    if (pgconf.url) {
+      return parse(pgconf.url);
+    }
 
-  function buildConString(pgconf) {
-    if (pgconf.url) return pgconf.url;
-
-    var host = pgconf.host || "localhost";
-    var port = pgconf.port || 5432;
-    var database = pgconf.database || "postgres";
-    var userString = pgconf.user
-    ? pgconf.user + (
-      pgconf.password ? ":" + pgconf.password : ""
-      ) + "@"
-    : "";
-    return "postgres://"+userString+host+":"+port+"/"+database+"?ssl=on";
+    return _.defaults({}, {
+      host: "localhost",
+      port: 5432,
+      database: "postgres"
+    });
   }
 
   function initPool() {
-    return _useConnection(function() {});
+//    return _useConnection(function() {});
   }
 
   function _useConnection(fn) {
-    return pgConnect(conString)
+    return pgPool.connectAsync()
     .spread(function(connection, release) {
       connection = {
-        query: Promise.promisify(connection.query, connection)
+
+        query: Promise.promisify(connection.query, connection),
+        driverQuery: _.bind(connection.query, connection)
       };
       return Promise.try(fn, connection)
       .finally(release);
@@ -52,10 +47,7 @@ module.exports = function(options) {
 
   pool.useConnection = useConnection;
   function useConnection(fn) {
-    return onPool
-    .then(function() {
-      return _useConnection(fn);
-    });
+    return _useConnection(fn);
   }
 
   pool.getStatus = getStatus;
@@ -70,6 +62,11 @@ module.exports = function(options) {
         maxSize: poolSize
       }
     };
+  }
+
+  pool.close = close;
+  function close() {
+    return pgPool.end();
   }
   return pool;
 };

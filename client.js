@@ -1,17 +1,21 @@
 "use strict";
+//require('pg').defaults.ssl = true;;
 
-var pg = require('pg').native,
-path = require('path'),
-assert = require('assert'),
-_ = require('lodash'),
-_str = require('underscore.string'),
-Promise = require('bluebird'),
-fs = Promise.promisifyAll(require('fs')),
-handlebars = require('handlebars'),
-crypto = require('crypto'),
-util = require('./util'),
-makePool = require('./pool'),
-makeStore = require('./store').store;
+var pg = require('pg'),
+    path = require('path'),
+    assert = require('assert'),
+    _ = require('lodash'),
+    _str = require('underscore.string'),
+    Promise = require('bluebird'),
+    fs = Promise.promisifyAll(require('fs')),
+    handlebars = require('handlebars'),
+    crypto = require('crypto'),
+    util = require('./util'),
+    makePool = require('./pool'),
+    makeStore = require('./store').store,
+    copyFrom = require('pg-copy-streams').from,
+    Readable = require('stream').Readable,
+    csvStringify = require('csv-stringify');
 
 
 function compileTemplate(content) {
@@ -120,7 +124,7 @@ function clientFn(options) {
     enableStore: false
   });
 
-  var pool = options.pool || makePool(_.pick(options, 'poolSize', 'url'));
+  var pool = options.pool || makePool(options);
   var logger = (options.logger === 'console')
   ? {
     debug: function() {
@@ -181,6 +185,36 @@ function clientFn(options) {
       return results ? egressAll(results) : null;
     });
   };
+
+  Connection.prototype.writeRows = function(tableName, rows) {
+    var self = this;
+    return new Promise(function(resolve, reject) {
+      if (!rows.length) {
+        resolve();
+        return;
+      }
+
+      var columns = '(' + _.map(_.keys(rows[0]), _.snakeCase).join(', ') + ')';
+      var dbOutStream = self.pgConnection.driverQuery(
+        copyFrom('COPY ' + tableName + ' ' + columns + ' FROM STDIN CSV')
+      );
+      var csvInStream = Readable();
+
+      csvStringify(rows, {}, function(err, csvData) {
+        if (err) {
+          reject(err);
+          return;
+        }
+        csvInStream.on('error', reject);
+        dbOutStream.on('error', reject);
+        dbOutStream.on('end', resolve);
+        csvInStream._read = function noop() {};
+        csvInStream.push(csvData);
+        csvInStream.push(null);
+        csvInStream.pipe(dbOutStream);
+      });
+    });
+  }
 
   Connection.prototype.queryRaw = function(text, vals) {
     var self = this;
@@ -329,7 +363,6 @@ function clientFn(options) {
     client.__loadpath = path;
   };
 
-
   // Execute a previously prepared statement
   client.exec = function(/*statement, params*/) {
     var args = _.toArray(arguments);
@@ -411,6 +444,12 @@ function clientFn(options) {
     });
   };
 
+  client.writeRows = function(rows) {
+    return useConnection( function(conn) {
+      return conn.writeRows(rows);
+    });
+  }
+
   // Returns a promise for work completed against a connection.
   //
   // You supply a function which receives a connection and
@@ -426,19 +465,14 @@ function clientFn(options) {
     return useConnection( function(conn) {
       var working = workFn(conn);
       assert(
-        _.isFunction(working.then),
+        _.isFunction(working && working.then),
         'Connection function must return a promise');
       return working;
     });
   };
 
   client.close = function() {
-    _.each(pg.pools.all, function(pool, key) {
-      pool.drain(function() {
-        pool.destroyAllNow();
-      });
-      delete pg.pools.all[key];
-    });
+    return pool.close();
   };
 
   client.cleansedConfig = function() {

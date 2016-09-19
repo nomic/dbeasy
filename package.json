@@ -29,7 +29,9 @@
     "handlebars": "1.3.0",
     "lodash": "^3.10.1",
     "moment-timezone": "^0.5.4",
-    "pg": "4.5.1",
+    "pg": "^6.1.0",
+    "pg-connection-string": "^0.1.3",
+    "pg-copy-streams": "^1.2.0",
     "pg-native": "1.10.0",
     "sprintf-js": "^1.0.3",
     "underscore.string": "2.3.3"
