@@ -12,11 +12,7 @@ var pg = require('pg'),
     crypto = require('crypto'),
     util = require('./util'),
     makePool = require('./pool'),
-    makeStore = require('./store').store,
-    copyFrom = require('pg-copy-streams').from,
-    Readable = require('stream').Readable,
-    csvStringify = require('csv-stringify');
-
+    makeStore = require('./store').store;
 
 function compileTemplate(content) {
   return handlebars.compile(content, {noEscape: true});
@@ -179,42 +175,17 @@ function clientFn(options) {
     return self.pgConnection.query('END');
   };
 
+  Connection.prototype.driver = function() {
+    var self = this;
+    return self.pgConnection.driver();
+  }
+
   Connection.prototype.query = function() {
     return this.queryRaw.apply(this, arguments)
     .then(function(results) {
       return results ? egressAll(results) : null;
     });
   };
-
-  Connection.prototype.writeRows = function(tableName, rows) {
-    var self = this;
-    return new Promise(function(resolve, reject) {
-      if (!rows.length) {
-        resolve();
-        return;
-      }
-
-      var columns = '(' + _.map(_.keys(rows[0]), _.snakeCase).join(', ') + ')';
-      var dbOutStream = self.pgConnection.driverQuery(
-        copyFrom('COPY ' + tableName + ' ' + columns + ' FROM STDIN CSV')
-      );
-      var csvInStream = Readable();
-
-      csvStringify(rows, {}, function(err, csvData) {
-        if (err) {
-          reject(err);
-          return;
-        }
-        csvInStream.on('error', reject);
-        dbOutStream.on('error', reject);
-        dbOutStream.on('end', resolve);
-        csvInStream._read = function noop() {};
-        csvInStream.push(csvData);
-        csvInStream.push(null);
-        csvInStream.pipe(dbOutStream);
-      });
-    });
-  }
 
   Connection.prototype.queryRaw = function(text, vals) {
     var self = this;
@@ -443,12 +414,6 @@ function clientFn(options) {
       });
     });
   };
-
-  client.writeRows = function(rows) {
-    return useConnection( function(conn) {
-      return conn.writeRows(rows);
-    });
-  }
 
   // Returns a promise for work completed against a connection.
   //

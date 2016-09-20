@@ -34,11 +34,10 @@ module.exports = function(options) {
 
   function _useConnection(fn) {
     return pgPool.connectAsync()
-    .spread(function(connection, release) {
-      connection = {
-
-        query: Promise.promisify(connection.query, connection),
-        driverQuery: _.bind(connection.query, connection)
+    .spread(function(pgConn, release) {
+      var connection = {
+        query: Promise.promisify(pgConn.query, pgConn),
+        driver: function() { return pgConn; }
       };
       return Promise.try(fn, connection)
       .finally(release);
