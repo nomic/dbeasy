@@ -21,14 +21,18 @@ suite('Migration', function() {
     var client;
     var migrator;
     var SCHEMA = 'school';
+    var migrationTable = 'migration.migration';
 
     setup(function() {
       if (client) client.close();
       client = util.createDb({poolSize: 3, enableStore: true});
       migrator = makeMigrator(client);
-      return migrator.clearMigrations(SCHEMA)
+      return migrator.clearMigrations(migrationTable)
       .then(function() {
         return layout(client).dropNamespace('school');
+      })
+      .then(function() {
+        return layout(client).ensureNamespace('school');
       });
     });
 
@@ -36,10 +40,10 @@ suite('Migration', function() {
       migrator.addMigrations([{
         date: new Date('2014-11-11T01:24'),
         description: 'create rooms',
-        sql: 'CREATE TABLE school.classroom();\nCREATE TABLE school.cafeteria();'
+        sql: 'CREATE TABLE school.classroom(); CREATE TABLE school.cafeteria();'
       }]);
 
-      return migrator.runPending(SCHEMA)
+      return migrator.runPending(migrationTable)
       .then(function() {
         return Promise.all([
           client.query('SELECT * FROM school.classroom;'),
@@ -63,7 +67,7 @@ suite('Migration', function() {
         sql: 'CREATE TABLE school.cafeteria();'
       }]);
 
-      return migrator.runPending(SCHEMA)
+      return migrator.runPending(migrationTable)
       .then(function() {
         return Promise.all([
           client.query('SELECT * FROM school.classroom;'),
@@ -90,7 +94,7 @@ suite('Migration', function() {
       return Promise.resolve()
         .then(function() {
           return migrator
-            .getStatus(SCHEMA)
+            .getStatus(migrationTable)
             .then(_.spread(function(items, hasPending, hasMissing) {
               expect(hasPending).to.equal(true);
               expect(hasMissing).to.equal(false);
@@ -98,9 +102,9 @@ suite('Migration', function() {
         })
         .then(function() {
           return migrator
-            .runPending(SCHEMA)
+            .runPending(migrationTable)
             .then(function() {
-              return migrator.getStatus(SCHEMA);
+              return migrator.getStatus(migrationTable);
             })
             .then(_.spread(function(items, hasPending, hasMissing) {
               expect(hasPending).to.equal(false);
@@ -115,7 +119,7 @@ suite('Migration', function() {
             sql: 'SELECT;'
           }]);
           return migrator
-            .getStatus(SCHEMA)
+            .getStatus(migrationTable)
             .then(_.spread(function(items, hasPending, hasMissing) {
               expect(hasPending).to.equal(false);
               expect(hasMissing).to.equal(true);
@@ -172,9 +176,9 @@ suite('Migration', function() {
         description: 'create rooms',
         sql: 'CREATE TABLE school.classroom();'
       }]);
-      return migrator.runPending(SCHEMA)
+      return migrator.runPending(migrationTable)
         .then(function() {
-          return migrator.runPending(SCHEMA);
+          return migrator.runPending(migrationTable);
         })
         .then(function() {
           var migrator = makeMigrator(client);
@@ -183,7 +187,7 @@ suite('Migration', function() {
             description: 'create rooms',
             sql: 'CREATE TABLE school.classroom();'
           }], {schema: 'school'});
-          return migrator.runPending(SCHEMA);
+          return migrator.runPending(migrationTable);
         });
 
     });

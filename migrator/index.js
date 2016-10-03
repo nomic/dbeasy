@@ -65,8 +65,8 @@ module.exports = function(client) {
 
   }
 
-  function ensureMigrationTable(schema) {
-    return layout.ensureTable(schema + '.migration', {
+  function ensureMigrationTable(table) {
+    return layout.ensureTable(table, {
       columns: {
         date: 'timestamp with time zone NOT NULL',
         description: 'text NOT NULL',
@@ -74,33 +74,33 @@ module.exports = function(client) {
       }});
   }
 
-  function getCommittedMigrations(schema) {
-    return ensureMigrationTable(schema)
+  function getCommittedMigrations(table) {
+    return ensureMigrationTable(table)
       .then(function() {
         return client.execTemplate(
           statements.getMigrations,
-          {schema: schema});
+          {table: table});
       });
   }
 
-  function recordMigration(migration, schema) {
+  function recordMigration(migration, table) {
     return client.execTemplate(
       statements.recordMigration,
-      {schema: schema},
+      {table: table},
       migration);
   }
 
-  function migrationTableExists(schema) {
-    return layout.tableExists(schema + '.migration');
+  function migrationTableExists(table) {
+    return layout.tableExists(table + '.migration');
   }
 
   migrator.clearMigrations = clearMigrations;
-  function clearMigrations(schema) {
+  function clearMigrations(table) {
     return onReady
-    .then(function() { return migrationTableExists(schema); })
+    .then(function() { return migrationTableExists(table); })
     .then(function(exists) {
       if (exists) {
-        return client.execTemplate(statements.clearMigrations, {schema: schema});
+        return client.execTemplate(statements.clearMigrations, {table: table});
       }
     });
   }
@@ -185,9 +185,9 @@ module.exports = function(client) {
   }
 
   migrator.getStatus = getStatus;
-  function getStatus(schema) {
+  function getStatus(table) {
     return onReady.then(function() {
-      return getCommittedMigrations(schema);
+      return getCommittedMigrations(table);
     })
       .then(function(committedMigrations) {
         var candidate = _.map(candidateMigrations, function(m) {
@@ -225,9 +225,9 @@ module.exports = function(client) {
   }
 
   migrator.up = migrator.runPending = runPending;
-  function runPending(schema) {
+  function runPending(table) {
     return onReady.then(function() {
-      return getStatus(schema);
+      return getStatus(table);
     })
       .then(_.spread(function(migrations, hasPending, hasMissing) {
         if (!hasPending && !hasMissing) {
@@ -248,7 +248,7 @@ module.exports = function(client) {
                     ? client.execTemplate(migration.template, templateVars)
                     : client.exec(migration.sql))
               .then(function() {
-                return recordMigration(migration, schema);
+                return recordMigration(migration, table);
               });
           }, null);
       }));
